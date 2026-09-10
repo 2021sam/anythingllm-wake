@@ -2,6 +2,7 @@ import sounddevice as sd
 import numpy as np
 import wave
 import time
+from collections import deque
 
 from openwakeword.model import Model
 from openwakeword.vad import VAD
@@ -24,9 +25,10 @@ WAKE_THRESHOLD = 0.5
 
 # These values came from our microphone/VAD test.
 START_THRESHOLD = 0.003
-CONTINUE_THRESHOLD = 0.001
+CONTINUE_THRESHOLD = 0.002
 SILENCE_SECONDS = 1.2
 MAX_RECORD_SECONDS = 15
+PRE_ROLL_SECONDS = 0.4
 
 WAV_FILE = "wake_question.wav"
 
@@ -52,6 +54,11 @@ print("Press Ctrl+C to stop.")
 
 def record_question():
     frames = []
+    pre_roll_chunks = max(
+        1,
+        int(PRE_ROLL_SECONDS * SAMPLE_RATE / VAD_CHUNK),
+    )
+    pre_roll = deque(maxlen=pre_roll_chunks)
     speech_started = False
     last_speech_time = None
     record_start_time = None
@@ -78,12 +85,15 @@ def record_question():
             )
 
             if not speech_started:
+                pre_roll.append(audio.copy())
+
                 if score >= START_THRESHOLD:
                     speech_started = True
                     record_start_time = time.monotonic()
                     last_speech_time = record_start_time
 
-                    frames.append(audio.copy())
+                    frames.extend(pre_roll)
+                    pre_roll.clear()
 
                     print(
                         f"Speech detected. "
