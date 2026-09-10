@@ -1,76 +1,150 @@
 # AnythingLLM Wake
 
-Local AI voice assistant using openWakeWord, faster-whisper, AnythingLLM, Kokoro TTS, and Home Assistant.
+Local AI home voice assistant running on macOS with openWakeWord, faster-whisper, AnythingLLM, and Home Assistant.
 
-## Voice Pipeline
+## Working Voice Pipeline
 
 Hey Jarvis
-→ openWakeWord
-→ microphone
+→ openWakeWord wake detection
+→ Silero VAD speech endpoint detection
 → faster-whisper speech-to-text
 → AnythingLLM Developer API
 → workspace RAG
 → local Llama model
-→ Kokoro TTS
-→ audio output
+→ Home Assistant
+→ audio-target helper
+→ selected home speaker(s)
 
-The next stage will route responses through Home Assistant to the home's media-player helper.
+After answering, Jarvis automatically returns to wake-word listening.
 
 ## Project Files
 
-- `test_wake.py` - end-to-end wake word and voice pipeline
-- `anythingllm_client.py` - AnythingLLM API client
-- `speak.py` - Kokoro text-to-speech
-- `test_stt.py` - speech-to-text test
-- `test_tts.py` - text-to-speech test
+- `test_wake.py` - end-to-end Jarvis voice assistant
+- `anythingllm_client.py` - AnythingLLM Developer API client
+- `homeassistant_tts.py` - Home Assistant TTS and speaker routing
+- `download_models.py` - downloads required openWakeWord models
+- `requirements.txt` - main Python environment dependencies
+- `test_stt.py` - standalone speech-to-text test
+- `speak.py` - optional Kokoro local TTS
+- `test_tts.py` - optional Kokoro TTS test
+
+## Main Python Environment
+
+The main Jarvis runtime uses Python 3.14.
+
+Create the environment:
+
+    python3.14 -m venv .venv
+    source .venv/bin/activate
+    python -m pip install -r requirements.txt
+
+Download the required openWakeWord models:
+
+    python download_models.py
+
+This installs the Hey Jarvis wake model and the feature/VAD models required by openWakeWord.
+
+## Optional Kokoro TTS Environment
+
+Kokoro/MLX uses a separate Python 3.12 environment:
+
+    .venv-tts/
+
+Kokoro was tested successfully and remains available for optional local TTS. The current home-speaker pipeline uses Home Assistant TTS instead.
 
 ## Private Files
 
-Secrets are stored locally and must never be committed to Git.
+Secrets and private configuration are stored locally and must never be committed to Git.
 
-### AnythingLLM API Key
-
-The AnythingLLM API key is stored in:
+AnythingLLM API key:
 
     .anythingllm_api_key
 
-The file is protected by `.gitignore`.
+Home Assistant URL:
 
-On a new installation, create the file locally and restrict its permissions:
+    .homeassistant_url
 
-    printf '%s\n' 'YOUR_API_KEY' > .anythingllm_api_key
+Home Assistant long-lived access token:
+
+    .homeassistant_token
+
+Restrict private files to the local user:
+
     chmod 600 .anythingllm_api_key
+    chmod 600 .homeassistant_url
+    chmod 600 .homeassistant_token
 
-Never put the actual API key in source code or this README.
+These files are excluded by `.gitignore`.
 
-Home Assistant credentials will follow the same pattern: private credentials stay in ignored local files and are never committed.
-
-## Python Environments
-
-Two local virtual environments are currently used:
-
-- `.venv/` - wake word, Whisper, and AnythingLLM client
-- `.venv-tts/` - Python 3.12 environment for Kokoro/MLX TTS
-
-Both are excluded from Git.
+Never put actual API keys, tokens, passwords, or private credentials in source code or this README.
 
 ## AnythingLLM
 
-AnythingLLM currently runs locally at:
+AnythingLLM runs locally at:
 
     http://localhost:3001
 
-The assistant uses workspace:
+Jarvis uses workspace:
 
     my-workspace
 
 Workspace documents and RAG data are managed by AnythingLLM and are not stored in this repository.
 
+## Home Assistant Speaker Routing
+
+Jarvis does not hard-code a physical speaker.
+
+Speaker selection uses the existing Home Assistant helper:
+
+    input_select.guard_1_audio_target
+
+Routing behavior:
+
+- `None` - no spoken output
+- `All` - speak through both configured amplifiers
+- a specific `media_player` - speak through that selected target
+
+TTS uses:
+
+    tts.google_translate_en_com
+
+This reuses the same speaker-selection approach used by the existing Guardian automations.
+
+## Start Jarvis
+
+Activate the environment:
+
+    cd /Users/server/apps/anythingllm-wake
+    source .venv/bin/activate
+
+Start Jarvis:
+
+    python test_wake.py
+
+Expected startup:
+
+    Loading Whisper model...
+    Listening for: HEY JARVIS
+    Press Ctrl+C to stop.
+
+Say:
+
+    Hey Jarvis
+
+Then ask a question normally. Silero VAD detects when the question begins and ends automatically.
+
 ## Security
 
-Never commit API keys, Home Assistant tokens, passwords, `.env` secrets, virtual environments, or generated recordings.
+Never commit:
 
-Before committing, verify changes with:
+- API keys
+- Home Assistant tokens
+- passwords
+- `.env` secrets
+- virtual environments
+- generated audio recordings
+
+Before committing changes:
 
     git status
     git diff --cached
