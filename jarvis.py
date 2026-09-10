@@ -142,6 +142,8 @@ with sd.InputStream(
     device=DEVICE,
 ) as stream:
 
+    shutdown_requested = False
+
     while True:
         audio, overflowed = stream.read(WAKE_CHUNK)
         audio = np.squeeze(audio)
@@ -166,6 +168,11 @@ with sd.InputStream(
         # record_question() opens its VAD microphone stream.
         stream.stop()
 
+        # Audible acknowledgement so the user knows Jarvis
+        # heard the wake word before listening for the question.
+        speak_home_assistant("Yes.")
+        time.sleep(1.0)
+
         try:
             if record_question():
                 print("Transcribing...")
@@ -182,6 +189,18 @@ with sd.InputStream(
 
                 print(f"You said: {text}")
 
+                if text.lower().strip(" .!?") in {
+                    "exit",
+                    "quit",
+                    "shutdown",
+                    "stop listening",
+                    "go offline",
+                }:
+                    print("Voice exit command received.")
+                    speak_home_assistant("Goodbye.")
+                    shutdown_requested = True
+                    break
+
                 if text:
                     answer = ask_anythingllm(text)
 
@@ -192,6 +211,9 @@ with sd.InputStream(
         finally:
             vad.reset_states()
             wake_model.reset()
-            stream.start()
 
-            print("\nListening for: HEY JARVIS")
+            if not shutdown_requested:
+                stream.start()
+                print("\nListening for: HEY JARVIS")
+
+    print("Jarvis stopped.")
