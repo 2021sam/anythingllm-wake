@@ -15,3 +15,7 @@ __pycache__/
 
 # macOS
 .DS_Store
+
+# Home Assistant private configuration
+.homeassistant_url
+.homeassistant_token
