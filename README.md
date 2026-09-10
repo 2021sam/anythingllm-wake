@@ -19,7 +19,7 @@ After answering, Jarvis automatically returns to wake-word listening.
 
 ## Project Files
 
-- `test_wake.py` - end-to-end Jarvis voice assistant
+- `jarvis.py` - end-to-end Jarvis voice assistant
 - `anythingllm_client.py` - AnythingLLM Developer API client
 - `homeassistant_tts.py` - Home Assistant TTS and speaker routing
 - `download_models.py` - downloads required openWakeWord models
@@ -119,7 +119,7 @@ Activate the environment:
 
 Start Jarvis:
 
-    python test_wake.py
+    python jarvis.py
 
 Expected startup:
 
