@@ -1,0 +1,17 @@
+# Secrets
+.anythingllm_api_key
+.env
+
+# Python virtual environments
+.venv/
+.venv-tts/
+
+# Python generated files
+__pycache__/
+*.pyc
+
+# Generated audio
+*.wav
+
+# macOS
+.DS_Store
