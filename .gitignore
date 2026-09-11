@@ -19,3 +19,6 @@ __pycache__/
 # Home Assistant private configuration
 .homeassistant_url
 .homeassistant_token
+
+# Generated local climate cache
+climate_cache.json
