@@ -22,3 +22,9 @@ __pycache__/
 
 # Generated local climate cache
 climate_cache.json
+
+# openrouteservice private API key
+.openrouteservice_api_key
+
+# Private default location
+.default_location
