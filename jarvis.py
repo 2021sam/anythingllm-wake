@@ -10,7 +10,10 @@ from faster_whisper import WhisperModel
 
 from anythingllm_client import ask_anythingllm
 from homeassistant_tts import speak_home_assistant
-from weather_service import answer_weather_question
+from weather_service import (
+    answer_climate_question,
+    answer_weather_question,
+)
 
 
 SAMPLE_RATE = 16000
@@ -213,7 +216,10 @@ with sd.InputStream(
                     break
 
                 if text:
-                    answer = answer_weather_question(text)
+                    answer = answer_climate_question(text)
+
+                    if answer is None:
+                        answer = answer_weather_question(text)
 
                     if answer is None:
                         answer = ask_anythingllm(text)

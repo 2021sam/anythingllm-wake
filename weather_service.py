@@ -129,3 +129,103 @@ def answer_weather_question(message):
         f"It is {temperature} degrees and {condition}. "
         f"Humidity is {humidity} percent."
     )
+
+
+# ---------------------------------------------------------------------------
+# Cached historical climate
+# ---------------------------------------------------------------------------
+
+import json
+import calendar
+
+CLIMATE_CACHE_FILE = BASE_DIR / "climate_cache.json"
+
+MONTH_NAMES = {
+    name.lower(): number
+    for number, name in enumerate(calendar.month_name)
+    if name
+}
+
+SEASONS = {
+    "winter": [12, 1, 2],
+    "spring": [3, 4, 5],
+    "summer": [6, 7, 8],
+    "fall": [9, 10, 11],
+    "autumn": [9, 10, 11],
+}
+
+
+def _load_climate_cache():
+    if not CLIMATE_CACHE_FILE.exists():
+        return None
+
+    return json.loads(CLIMATE_CACHE_FILE.read_text())
+
+
+def _average_months(climate, month_numbers):
+    values = [
+        climate["months"][str(month)]
+        for month in month_numbers
+    ]
+
+    return {
+        "high": round(
+            sum(v["avg_high_f"] for v in values)
+            / len(values)
+        ),
+        "low": round(
+            sum(v["avg_low_f"] for v in values)
+            / len(values)
+        ),
+        "precip": round(
+            sum(v["avg_precip_in"] for v in values),
+            1,
+        ),
+    }
+
+
+def answer_climate_question(message):
+    text = message.lower().strip()
+
+    climate_words = (
+        "usually",
+        "typical",
+        "typically",
+        "average",
+        "normally",
+        "generally",
+    )
+
+    if not any(word in text for word in climate_words):
+        return None
+
+    climate = _load_climate_cache()
+
+    if climate is None:
+        return None
+
+    for month_name, month_number in MONTH_NAMES.items():
+        if month_name in text:
+            values = climate["months"][str(month_number)]
+
+            return (
+                f"In {month_name.title()}, the typical high is "
+                f"around {values['avg_high_f']} degrees and the "
+                f"typical low is around {values['avg_low_f']} degrees."
+            )
+
+    for season, months in SEASONS.items():
+        if season in text:
+            values = _average_months(climate, months)
+
+            spoken_season = (
+                "fall" if season == "autumn" else season
+            )
+
+            return (
+                f"In {spoken_season}, typical daytime highs are "
+                f"around {values['high']} degrees, with nighttime "
+                f"lows around {values['low']} degrees."
+            )
+
+    return None
