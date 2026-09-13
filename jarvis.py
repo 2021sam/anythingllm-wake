@@ -34,6 +34,14 @@ SILENCE_SECONDS = 1.2
 MAX_RECORD_SECONDS = 15
 PRE_ROLL_SECONDS = 0.4
 
+# Diagnostic interval while testing headset disconnect/reconnect.
+AUDIO_HEALTH_INTERVAL_SECONDS = 60
+EXPECTED_INPUT_DEVICE = "Arctis 7P+"
+
+# Reopen the microphone if it delivers continuous digital silence.
+ZERO_AUDIO_RECONNECT_SECONDS = 300  # 5 minutes
+AUDIO_RECONNECT_RETRY_SECONDS = 5
+
 WAV_FILE = "wake_question.wav"
 
 
@@ -148,92 +156,243 @@ def record_question():
     return True
 
 
-with sd.InputStream(
-    samplerate=SAMPLE_RATE,
-    channels=1,
-    dtype="int16",
-    blocksize=WAKE_CHUNK,
-    device=DEVICE,
-) as stream:
+def find_input_device():
+    devices = sd.query_devices()
 
-    shutdown_requested = False
+    for index, device in enumerate(devices):
+        if (
+            EXPECTED_INPUT_DEVICE.lower()
+            in device["name"].lower()
+            and device["max_input_channels"] > 0
+        ):
+            return index
 
-    while True:
-        audio, overflowed = stream.read(WAKE_CHUNK)
-        audio = np.squeeze(audio)
+    raise RuntimeError(
+        f"Input device not found: {EXPECTED_INPUT_DEVICE}"
+    )
 
-        scores = wake_model.predict(audio)
 
-        detected = False
+shutdown_requested = False
 
-        for name, score in scores.items():
-            if score >= WAKE_THRESHOLD:
-                print(
-                    f"\nWAKE WORD DETECTED: "
-                    f"{name} score={score:.2f}"
-                )
-                detected = True
-                break
+while not shutdown_requested:
+    reconnect_requested = False
 
-        if not detected:
-            continue
+    try:
+        DEVICE = find_input_device()
 
-        # Close the wake-word microphone stream while
-        # record_question() opens its VAD microphone stream.
-        stream.stop()
+        print(
+            f"\nOpening microphone: "
+            f"{DEVICE}: {EXPECTED_INPUT_DEVICE}",
+            flush=True,
+        )
 
-        # Audible acknowledgement so the user knows Jarvis
-        # heard the wake word before listening for the question.
-        speak_home_assistant("Yes.")
-        time.sleep(1.0)
+        zero_audio_since = None
+        last_audio_health = time.monotonic()
+        ignore_audio_until = time.monotonic() + 5.0
 
-        try:
-            if record_question():
-                print("Transcribing...")
+        with sd.InputStream(
+            samplerate=SAMPLE_RATE,
+            channels=1,
+            dtype="int16",
+            blocksize=WAKE_CHUNK,
+            device=DEVICE,
+        ) as stream:
 
-                segments, info = whisper_model.transcribe(
-                    WAV_FILE,
-                    language="en",
-                )
-
-                text = " ".join(
-                    segment.text.strip()
-                    for segment in segments
-                ).strip()
-
-                print(f"You said: {text}")
-
-                if text.lower().strip(" .!?") in {
-                    "exit",
-                    "quit",
-                    "shutdown",
-                    "stop listening",
-                    "go offline",
-                }:
-                    print("Voice exit command received.")
-                    speak_home_assistant("Goodbye.")
-                    shutdown_requested = True
+            while True:
+                try:
+                    audio, overflowed = stream.read(WAKE_CHUNK)
+                except Exception as exc:
+                    print(
+                        f"\nAUDIO READ ERROR: "
+                        f"{type(exc).__name__}: {exc}",
+                        flush=True,
+                    )
+                    reconnect_requested = True
                     break
 
-                if text:
-                    answer = answer_climate_question(text)
+                now = time.monotonic()
 
-                    if answer is None:
-                        answer = answer_weather_question(text)
+                if (
+                    now - last_audio_health
+                    >= AUDIO_HEALTH_INTERVAL_SECONDS
+                ):
+                    last_audio_health = now
 
-                    if answer is None:
-                        answer = ask_anythingllm(text)
+                    try:
+                        devices = sd.query_devices()
 
-                    print(f"Assistant: {answer}")
+                        arctis_inputs = [
+                            (index, device["name"])
+                            for index, device in enumerate(devices)
+                            if (
+                                EXPECTED_INPUT_DEVICE.lower()
+                                in device["name"].lower()
+                                and device["max_input_channels"] > 0
+                            )
+                        ]
 
-                    speak_home_assistant(answer)
+                        try:
+                            selected_device = sd.query_devices(
+                                DEVICE,
+                                "input",
+                            )
+                            selected_name = selected_device["name"]
+                        except Exception as exc:
+                            selected_name = (
+                                f"ERROR: {type(exc).__name__}: {exc}"
+                            )
 
-        finally:
+                        print(
+                            f"\n[AUDIO HEALTH] "
+                            f"stream_active={stream.active} "
+                            f"stream_stopped={stream.stopped} "
+                            f"selected_device={DEVICE}: "
+                            f"{selected_name} "
+                            f"arctis_inputs={arctis_inputs}",
+                            flush=True,
+                        )
+
+                    except Exception as exc:
+                        print(
+                            f"\n[AUDIO HEALTH ERROR] "
+                            f"{type(exc).__name__}: {exc}",
+                            flush=True,
+                        )
+
+                if overflowed:
+                    print(
+                        "\n[AUDIO WARNING] Input overflow detected.",
+                        flush=True,
+                    )
+
+                audio = np.squeeze(audio)
+
+                if now < ignore_audio_until:
+                    continue
+
+                if np.all(audio == 0):
+                    if zero_audio_since is None:
+                        zero_audio_since = now
+
+                    zero_seconds = now - zero_audio_since
+
+                    if zero_seconds >= ZERO_AUDIO_RECONNECT_SECONDS:
+                        print(
+                            f"\n[AUDIO RECONNECT] "
+                            f"Received zero audio for "
+                            f"{zero_seconds:.0f} seconds. "
+                            f"Reopening microphone.",
+                            flush=True,
+                        )
+                        reconnect_requested = True
+                        break
+                else:
+                    zero_audio_since = None
+
+                scores = wake_model.predict(audio)
+
+                detected = False
+
+                for name, score in scores.items():
+                    if score >= WAKE_THRESHOLD:
+                        print(
+                            f"\nWAKE WORD DETECTED: "
+                            f"{name} score={score:.2f}"
+                        )
+                        detected = True
+                        break
+
+                if not detected:
+                    continue
+
+                stream.stop()
+
+                speak_home_assistant("Yes.")
+                time.sleep(1.0)
+
+                try:
+                    if record_question():
+                        print("Transcribing...")
+
+                        segments, info = whisper_model.transcribe(
+                            WAV_FILE,
+                            language="en",
+                        )
+
+                        text = " ".join(
+                            segment.text.strip()
+                            for segment in segments
+                        ).strip()
+
+                        print(f"You said: {text}")
+
+                        if text.lower().strip(" .!?") in {
+                            "exit",
+                            "quit",
+                            "shutdown",
+                            "stop listening",
+                            "go offline",
+                        }:
+                            print("Voice exit command received.")
+                            speak_home_assistant("Goodbye.")
+                            shutdown_requested = True
+                            break
+
+                        if text:
+                            answer = answer_climate_question(text)
+
+                            if answer is None:
+                                answer = answer_weather_question(text)
+
+                            if answer is None:
+                                answer = ask_anythingllm(text)
+
+                            print(f"Assistant: {answer}")
+
+                            speak_home_assistant(answer)
+
+                finally:
+                    vad.reset_states()
+                    wake_model.reset()
+
+                    if not shutdown_requested:
+                        print(
+                            "\nReopening microphone for wake-word detection...",
+                            flush=True,
+                        )
+                        reconnect_requested = True
+
+                if reconnect_requested and not shutdown_requested:
+                    break
+
+        if reconnect_requested and not shutdown_requested:
             vad.reset_states()
             wake_model.reset()
 
-            if not shutdown_requested:
-                stream.start()
-                print("\nListening for: HEY JARVIS")
+            print(
+                f"Retrying microphone in "
+                f"{AUDIO_RECONNECT_RETRY_SECONDS} seconds...",
+                flush=True,
+            )
 
-    print("Jarvis stopped.")
+            time.sleep(AUDIO_RECONNECT_RETRY_SECONDS)
+
+    except KeyboardInterrupt:
+        shutdown_requested = True
+
+    except Exception as exc:
+        print(
+            f"\n[AUDIO CONNECTION ERROR] "
+            f"{type(exc).__name__}: {exc}",
+            flush=True,
+        )
+
+        if not shutdown_requested:
+            print(
+                f"Retrying microphone in "
+                f"{AUDIO_RECONNECT_RETRY_SECONDS} seconds...",
+                flush=True,
+            )
+            time.sleep(AUDIO_RECONNECT_RETRY_SECONDS)
+
+print("Jarvis stopped.")
