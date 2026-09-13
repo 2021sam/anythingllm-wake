@@ -42,6 +42,13 @@ EXPECTED_INPUT_DEVICE = "Arctis 7P+"
 ZERO_AUDIO_RECONNECT_SECONDS = 300  # 5 minutes
 AUDIO_RECONNECT_RETRY_SECONDS = 5
 
+# After Jarvis answers, remain available for natural follow-up
+# questions without requiring the wake word again.
+CONVERSATION_TIMEOUT_SECONDS = 30
+
+# "Hey, chill" temporarily suspends conversation mode.
+DEFAULT_CHILL_SECONDS = 5 * 60
+
 WAV_FILE = "wake_question.wav"
 
 
@@ -156,6 +163,87 @@ def record_question():
     return True
 
 
+def normalize_command(text):
+    import re
+
+    # Remove punctuation and collapse repeated whitespace.
+    normalized = re.sub(r"[^\w\s]", " ", text.lower())
+    return " ".join(normalized.split())
+
+
+def parse_chill_seconds(text):
+    """
+    Examples:
+      Chill.                         -> 5 minutes
+      Chill out.                     -> 5 minutes
+      Go to sleep.                   -> 5 minutes
+      Hey, chill.                    -> 5 minutes
+      Hey, chill out.                -> 5 minutes
+      Hey, go to sleep.              -> 5 minutes
+      Chill for 10 minutes.          -> 10 minutes
+      Chill out for an hour.         -> 1 hour
+      Go to sleep for 30 seconds.    -> 30 seconds
+    """
+    import re
+
+    normalized = normalize_command(text)
+
+    match = re.fullmatch(
+        r"(?:hey\s+)?"
+        r"(?:chill(?:\s+out)?|go\s+to\s+sleep)"
+        r"(?:\s+for\s+"
+        r"(\d+|a|an|one)\s*"
+        r"(second|seconds|minute|minutes|hour|hours)"
+        r")?",
+        normalized,
+    )
+
+    if not match:
+        return None
+
+    amount_text, unit = match.groups()
+
+    if amount_text is None:
+        return DEFAULT_CHILL_SECONDS
+
+    if amount_text in {"a", "an", "one"}:
+        amount = 1
+    else:
+        amount = int(amount_text)
+
+    if unit.startswith("second"):
+        return amount
+
+    if unit.startswith("hour"):
+        return amount * 60 * 60
+
+    return amount * 60
+
+
+def format_chill_duration(seconds):
+    if seconds % 3600 == 0:
+        hours = seconds // 3600
+        return (
+            "1 hour"
+            if hours == 1
+            else f"{hours} hours"
+        )
+
+    if seconds % 60 == 0:
+        minutes = seconds // 60
+        return (
+            "1 minute"
+            if minutes == 1
+            else f"{minutes} minutes"
+        )
+
+    return (
+        "1 second"
+        if seconds == 1
+        else f"{seconds} seconds"
+    )
+
+
 def find_input_device():
     devices = sd.query_devices()
 
@@ -176,6 +264,7 @@ shutdown_requested = False
 
 while not shutdown_requested:
     reconnect_requested = False
+    reconnect_is_error = False
 
     try:
         DEVICE = find_input_device()
@@ -188,7 +277,7 @@ while not shutdown_requested:
 
         zero_audio_since = None
         last_audio_health = time.monotonic()
-        ignore_audio_until = time.monotonic() + 5.0
+        ignore_audio_until = time.monotonic() + 0.5
 
         with sd.InputStream(
             samplerate=SAMPLE_RATE,
@@ -208,6 +297,7 @@ while not shutdown_requested:
                         flush=True,
                     )
                     reconnect_requested = True
+                    reconnect_is_error = True
                     break
 
                 now = time.monotonic()
@@ -285,6 +375,7 @@ while not shutdown_requested:
                             flush=True,
                         )
                         reconnect_requested = True
+                        reconnect_is_error = True
                         break
                 else:
                     zero_audio_since = None
@@ -326,7 +417,9 @@ while not shutdown_requested:
 
                         print(f"You said: {text}")
 
-                        if text.lower().strip(" .!?") in {
+                        normalized_text = normalize_command(text)
+
+                        if normalized_text in {
                             "exit",
                             "quit",
                             "shutdown",
@@ -336,6 +429,147 @@ while not shutdown_requested:
                             print("Voice exit command received.")
                             speak_home_assistant("Goodbye.")
                             shutdown_requested = True
+                            break
+
+                        chill_seconds = parse_chill_seconds(text)
+
+                        if chill_seconds is not None:
+                            duration_text = format_chill_duration(
+                                chill_seconds
+                            )
+
+                            print(
+                                f"Chill command received. "
+                                f"Sleeping for {duration_text}."
+                            )
+
+                            speak_home_assistant(
+                                f"Okay. I'll chill for {duration_text}."
+                            )
+
+                            chill_until = (
+                                time.monotonic() + chill_seconds
+                            )
+
+                            wake_model.reset()
+                            vad.reset_states()
+
+                            with sd.InputStream(
+                                samplerate=SAMPLE_RATE,
+                                channels=1,
+                                dtype="int16",
+                                blocksize=WAKE_CHUNK,
+                                device=DEVICE,
+                            ) as chill_stream:
+
+                                while time.monotonic() < chill_until:
+                                    audio, overflowed = chill_stream.read(
+                                        WAKE_CHUNK
+                                    )
+
+                                    audio = np.squeeze(audio)
+
+                                    scores = wake_model.predict(audio)
+
+                                    woke_early = False
+
+                                    for name, score in scores.items():
+                                        if score >= WAKE_THRESHOLD:
+                                            print(
+                                                "\nWake word detected "
+                                                "during chill mode."
+                                            )
+
+                                            chill_stream.stop()
+
+                                            # Stay silent during chill mode.
+                                            # Speaking "Yes" here can be picked
+                                            # up by our own microphone.
+                                            wake_model.reset()
+                                            vad.reset_states()
+                                            time.sleep(0.15)
+
+                                            if record_question():
+                                                print("Transcribing...")
+
+                                                segments, info = (
+                                                    whisper_model.transcribe(
+                                                        WAV_FILE,
+                                                        language="en",
+                                                    )
+                                                )
+
+                                                wake_text = " ".join(
+                                                    segment.text.strip()
+                                                    for segment in segments
+                                                ).strip()
+
+                                                print(
+                                                    f"You said: {wake_text}"
+                                                )
+
+                                                normalized_wake_text = (
+                                                    normalize_command(
+                                                        wake_text
+                                                    )
+                                                )
+
+                                                wake_commands = {
+                                                    "wake up",
+                                                    "wake",
+                                                    "come back",
+                                                    "im back",
+                                                    "i am back",
+                                                }
+
+                                                wake_command_text = (
+                                                    normalized_wake_text
+                                                )
+
+                                                for prefix in (
+                                                    "yes ",
+                                                    "jarvis ",
+                                                    "hey jarvis ",
+                                                ):
+                                                    if wake_command_text.startswith(
+                                                        prefix
+                                                    ):
+                                                        wake_command_text = (
+                                                            wake_command_text[
+                                                                len(prefix):
+                                                            ]
+                                                        )
+
+                                                if wake_command_text in wake_commands:
+                                                    print(
+                                                        "Chill mode "
+                                                        "cancelled early."
+                                                    )
+
+                                                    speak_home_assistant(
+                                                        "I'm back."
+                                                    )
+
+                                                    woke_early = True
+
+                                            break
+
+                                    if woke_early:
+                                        break
+
+                                    if not chill_stream.active:
+                                        wake_model.reset()
+                                        vad.reset_states()
+                                        chill_stream.start()
+
+                            print(
+                                "Chill period complete. "
+                                "Returning to wake-word mode."
+                            )
+
+                            wake_model.reset()
+                            vad.reset_states()
+                            reconnect_requested = True
                             break
 
                         if text:
@@ -369,13 +603,19 @@ while not shutdown_requested:
             vad.reset_states()
             wake_model.reset()
 
-            print(
-                f"Retrying microphone in "
-                f"{AUDIO_RECONNECT_RETRY_SECONDS} seconds...",
-                flush=True,
-            )
+            if reconnect_is_error:
+                print(
+                    f"Retrying microphone in "
+                    f"{AUDIO_RECONNECT_RETRY_SECONDS} seconds...",
+                    flush=True,
+                )
 
-            time.sleep(AUDIO_RECONNECT_RETRY_SECONDS)
+                time.sleep(AUDIO_RECONNECT_RETRY_SECONDS)
+            else:
+                print(
+                    "Reopening microphone immediately...",
+                    flush=True,
+                )
 
     except KeyboardInterrupt:
         shutdown_requested = True
