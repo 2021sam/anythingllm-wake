@@ -1,11 +1,110 @@
 from pathlib import Path
 import requests
+import re
+
+from travel_service import _geocode
 
 BASE_DIR = Path(__file__).resolve().parent
 HA_URL_FILE = BASE_DIR / ".homeassistant_url"
 HA_TOKEN_FILE = BASE_DIR / ".homeassistant_token"
 
 WEATHER_ENTITY = "weather.forecast_home"
+
+
+OPEN_METEO_URL = "https://api.open-meteo.com/v1/forecast"
+
+
+def _extract_requested_location(message):
+    text = message.strip()
+
+    match = re.search(
+        r"\b(?:in|for)\s+(.+?)(?:\s+(?:today|tomorrow|tonight))?[?.!]*$",
+        text,
+        flags=re.IGNORECASE,
+    )
+
+    if not match:
+        return None
+
+    location = match.group(1).strip(" ,.?")
+
+    home_words = {
+        "here",
+        "home",
+        "my home",
+        "the house",
+        "my house",
+    }
+
+    if location.lower() in home_words:
+        return None
+
+    return location
+
+
+def _remote_weather(location):
+    feature = _geocode(location)
+
+    lon, lat = feature["geometry"]["coordinates"]
+    props = feature.get("properties", {})
+
+    spoken_location = (
+        props.get("locality")
+        or props.get("county")
+        or props.get("name")
+        or location
+    )
+
+    response = requests.get(
+        OPEN_METEO_URL,
+        params={
+            "latitude": lat,
+            "longitude": lon,
+            "temperature_unit": "fahrenheit",
+            "current": (
+                "temperature_2m,"
+                "relative_humidity_2m,"
+                "weather_code"
+            ),
+            "daily": (
+                "weather_code,"
+                "temperature_2m_max,"
+                "temperature_2m_min"
+            ),
+            "timezone": "auto",
+            "forecast_days": 2,
+        },
+        timeout=15,
+    )
+    response.raise_for_status()
+
+    return spoken_location, response.json()
+
+
+def _weather_code_text(code):
+    mapping = {
+        0: "clear",
+        1: "mostly clear",
+        2: "partly cloudy",
+        3: "cloudy",
+        45: "foggy",
+        48: "foggy",
+        51: "light drizzle",
+        53: "drizzle",
+        55: "heavy drizzle",
+        61: "light rain",
+        63: "rain",
+        65: "heavy rain",
+        71: "light snow",
+        73: "snow",
+        75: "heavy snow",
+        80: "light rain showers",
+        81: "rain showers",
+        82: "heavy rain showers",
+        95: "thunderstorms",
+    }
+
+    return mapping.get(code, "unknown conditions")
 
 
 def _headers():
@@ -86,13 +185,76 @@ def answer_weather_question(message):
     if not any(word in text for word in weather_words):
         return None
 
+    requested_location = _extract_requested_location(message)
+
+    if requested_location:
+        try:
+            location_name, data = _remote_weather(requested_location)
+        except Exception:
+            return (
+                f"I couldn't retrieve the weather for "
+                f"{requested_location}."
+            )
+
+        current = data.get("current", {})
+        daily = data.get("daily", {})
+
+        if "tomorrow" in text:
+            highs = daily.get("temperature_2m_max", [])
+            lows = daily.get("temperature_2m_min", [])
+            codes = daily.get("weather_code", [])
+
+            if len(highs) > 1 and len(lows) > 1:
+                condition = _weather_code_text(
+                    codes[1] if len(codes) > 1 else None
+                )
+
+                return (
+                    f"In {location_name} tomorrow, it will be "
+                    f"{condition}, with a high of "
+                    f"{round(highs[1])} degrees and a low of "
+                    f"{round(lows[1])} degrees."
+                )
+
+        if "high" in text or "how hot" in text:
+            highs = daily.get("temperature_2m_max", [])
+
+            if highs:
+                return (
+                    f"In {location_name}, today's high is "
+                    f"{round(highs[0])} degrees."
+                )
+
+        if (
+            "low" in text
+            or "tonight" in text
+            or "how cold" in text
+        ):
+            lows = daily.get("temperature_2m_min", [])
+
+            if lows:
+                return (
+                    f"In {location_name}, tonight's low is "
+                    f"{round(lows[0])} degrees."
+                )
+
+        temperature = current.get("temperature_2m")
+        humidity = current.get("relative_humidity_2m")
+        condition = _weather_code_text(
+            current.get("weather_code")
+        )
+
+        return (
+            f"In {location_name}, it is "
+            f"{round(temperature)} degrees and {condition}. "
+            f"Humidity is {round(humidity)} percent."
+        )
+
     current = get_current_weather()
     forecast = get_daily_forecast()
 
     today = forecast[0]
     tomorrow = forecast[1] if len(forecast) > 1 else None
-
-    unit = current.get("temperature_unit", "°F")
 
     if "tomorrow" in text and tomorrow:
         condition = _condition_text(tomorrow.get("condition"))
