@@ -10,6 +10,7 @@ def answer_time_question(message: str):
 
     if (
         "what time is it" in text
+        or "what time it is" in text
         or "what's the time" in text
         or "whats the time" in text
         or "current time" in text

@@ -12,6 +12,7 @@ from faster_whisper import WhisperModel
 
 from anythingllm_client import ask_anythingllm
 from time_service import answer_time_question
+from conversation_service import CASUAL, ROOM_QUESTION, classify_utterance
 from homeassistant_tts import speak_home_assistant
 from weather_service import (
     answer_climate_question,
@@ -83,6 +84,87 @@ whisper_model = WhisperModel(
 
 print("Listening for: HEY JARVIS")
 print("Press Ctrl+C to stop.")
+
+
+
+def human_speaks_during_room_delay(delay_seconds):
+    """
+    Give another person a chance to answer a room question.
+
+    Returns True if human speech begins during the grace period.
+    If speech begins, wait for that person to finish before
+    returning so Jarvis does not immediately capture the answer
+    as another follow-up.
+    """
+    if delay_seconds <= 0:
+        return False
+
+    print(
+        f"[ROOM] Waiting {format_seconds(delay_seconds)} "
+        "for someone else to answer..."
+    )
+
+    speech_hits = 0
+    speech_started = False
+    last_speech_time = None
+
+    start_time = time.monotonic()
+
+    with sd.InputStream(
+        samplerate=SAMPLE_RATE,
+        channels=1,
+        dtype="int16",
+        blocksize=VAD_CHUNK,
+        device=DEVICE,
+    ) as stream:
+
+        while True:
+            audio, _ = stream.read(VAD_CHUNK)
+            audio = np.squeeze(audio)
+
+            score = float(
+                vad.predict(
+                    audio,
+                    frame_size=VAD_CHUNK,
+                )
+            )
+
+            now = time.monotonic()
+
+            if not speech_started:
+                if score >= START_THRESHOLD:
+                    speech_hits += 1
+                else:
+                    speech_hits = 0
+
+                if (
+                    speech_hits
+                    >= SPEECH_START_CONSECUTIVE_CHUNKS
+                ):
+                    speech_started = True
+                    last_speech_time = now
+
+                    print(
+                        "[ROOM] Someone else started speaking. "
+                        "Jarvis will stay quiet."
+                    )
+
+                elif now - start_time >= delay_seconds:
+                    print(
+                        "[ROOM] Nobody answered."
+                    )
+                    return False
+
+            else:
+                if score >= CONTINUE_THRESHOLD:
+                    last_speech_time = now
+
+                if (
+                    last_speech_time is not None
+                    and now - last_speech_time
+                    >= SILENCE_SECONDS
+                ):
+                    return True
 
 
 def record_question():
@@ -887,6 +969,38 @@ while not shutdown_requested:
 
                                 if not followup_text:
                                     continue
+
+                                followup_kind = classify_utterance(
+                                    followup_text,
+                                    active_conversation=True,
+                                )
+
+                                print(
+                                    f"[CONVERSATION] "
+                                    f"classification={followup_kind}"
+                                )
+
+                                if followup_kind == CASUAL:
+                                    print(
+                                        "[CONVERSATION] "
+                                        "Casual speech ignored."
+                                    )
+                                    continue
+
+                                if (
+                                    followup_kind
+                                    == ROOM_QUESTION
+                                ):
+                                    human_answered = (
+                                        human_speaks_during_room_delay(
+                                            settings[
+                                                "room_answer_delay"
+                                            ]
+                                        )
+                                    )
+
+                                    if human_answered:
+                                        continue
 
                                 followup_answer = (
                                     answer_time_question(
