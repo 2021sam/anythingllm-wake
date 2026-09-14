@@ -10,14 +10,13 @@ from openwakeword.model import Model
 from openwakeword.vad import VAD
 from faster_whisper import WhisperModel
 
-from anythingllm_client import ask_anythingllm
-from time_service import answer_time_question
+from current_request import CurrentRequest
+from request_router import answer_question
 from conversation_service import CASUAL, ROOM_QUESTION, classify_utterance
 from homeassistant_tts import speak_home_assistant
-from weather_service import (
-    answer_climate_question,
-    answer_weather_question,
-)
+
+
+current_request = CurrentRequest()
 
 
 SAMPLE_RATE = 16000
@@ -902,16 +901,10 @@ while not shutdown_requested:
                             break
 
                         if text:
-                            answer = answer_time_question(text)
-
-                            if answer is None:
-                                answer = answer_climate_question(text)
-
-                            if answer is None:
-                                answer = answer_weather_question(text)
-
-                            if answer is None:
-                                answer = ask_anythingllm(text)
+                            answer = answer_question(
+                                text,
+                                current_request,
+                            )
 
                             print(f"Assistant: {answer}")
 
@@ -1003,31 +996,11 @@ while not shutdown_requested:
                                         continue
 
                                 followup_answer = (
-                                    answer_time_question(
-                                        followup_text
+                                    answer_question(
+                                        followup_text,
+                                        current_request,
                                     )
                                 )
-
-                                if followup_answer is None:
-                                    followup_answer = (
-                                        answer_climate_question(
-                                            followup_text
-                                        )
-                                    )
-
-                                if followup_answer is None:
-                                    followup_answer = (
-                                        answer_weather_question(
-                                            followup_text
-                                        )
-                                    )
-
-                                if followup_answer is None:
-                                    followup_answer = (
-                                        ask_anythingllm(
-                                            followup_text
-                                        )
-                                    )
 
                                 print(
                                     f"Assistant: {followup_answer}"
