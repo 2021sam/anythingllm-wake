@@ -738,6 +738,61 @@ while not shutdown_requested:
 
                         print(f"You said: {text}")
 
+                        # Whisper can sometimes include the wake phrase
+                        # because recording starts immediately after
+                        # OpenWakeWord detects "Hey Jarvis".
+                        normalized_for_wake = normalize_command(text)
+
+                        wake_phrases = (
+                            "hey jarvis",
+                            "hey, jarvis",
+                            "jarvis",
+                        )
+
+                        wake_only = normalized_for_wake in {
+                            normalize_command(phrase)
+                            for phrase in wake_phrases
+                        }
+
+                        if wake_only:
+                            print(
+                                "[WAKE] Wake phrase was transcribed as "
+                                "the question. Waiting for the real question."
+                            )
+
+                            if not record_question():
+                                continue
+
+                            print("Transcribing question...")
+
+                            segments, info = whisper_model.transcribe(
+                                WAV_FILE,
+                                language="en",
+                            )
+
+                            text = " ".join(
+                                segment.text.strip()
+                                for segment in segments
+                            ).strip()
+
+                            print(f"You said: {text}")
+
+                        # If continuous speech produced something like
+                        # "Hey Jarvis what time is it", remove only the
+                        # leading wake phrase and retain the command.
+                        lowered = text.lower().strip()
+
+                        for prefix in (
+                            "hey jarvis,",
+                            "hey jarvis",
+                            "jarvis,",
+                        ):
+                            if lowered.startswith(prefix):
+                                text = text[len(prefix):].lstrip(
+                                    " ,.!?:;-"
+                                )
+                                break
+
                         normalized_text = normalize_command(text)
 
                         if handle_parameter_command(
@@ -959,6 +1014,34 @@ while not shutdown_requested:
                                 print(
                                     f"Follow-up: {followup_text}"
                                 )
+
+                                if not followup_text:
+                                    continue
+
+                                # In conversation mode, the user may still
+                                # naturally say "Hey Jarvis, ..." before a
+                                # follow-up. Strip the leading wake phrase
+                                # before classifying or answering it.
+                                lowered = followup_text.lower().strip()
+
+                                for prefix in (
+                                    "hey jarvis,",
+                                    "hey jarvis",
+                                    "hey, jarvis,",
+                                    "hey, jarvis",
+                                    "jarvis,",
+                                ):
+                                    if lowered.startswith(prefix):
+                                        followup_text = (
+                                            followup_text[len(prefix):]
+                                            .lstrip(" ,.!?:;-")
+                                        )
+                                        print(
+                                            "[CONVERSATION] "
+                                            f"Wake phrase removed -> "
+                                            f"{followup_text!r}"
+                                        )
+                                        break
 
                                 if not followup_text:
                                     continue
