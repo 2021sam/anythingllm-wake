@@ -28,3 +28,4 @@ climate_cache.json
 
 # Private default location
 .default_location
+.jarvis_settings.json

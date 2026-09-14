@@ -2,6 +2,8 @@ import sounddevice as sd
 import numpy as np
 import wave
 import time
+import json
+from pathlib import Path
 from collections import deque
 
 from openwakeword.model import Model
@@ -9,6 +11,7 @@ from openwakeword.vad import VAD
 from faster_whisper import WhisperModel
 
 from anythingllm_client import ask_anythingllm
+from time_service import answer_time_question
 from homeassistant_tts import speak_home_assistant
 from weather_service import (
     answer_climate_question,
@@ -28,11 +31,13 @@ DEVICE = 1
 WAKE_THRESHOLD = 0.5
 
 # These values came from our microphone/VAD test.
-START_THRESHOLD = 0.003
-CONTINUE_THRESHOLD = 0.002
-SILENCE_SECONDS = 1.2
+START_THRESHOLD = 0.008
+CONTINUE_THRESHOLD = 0.003
+SILENCE_SECONDS = 0.8
 MAX_RECORD_SECONDS = 15
 PRE_ROLL_SECONDS = 0.4
+SPEECH_START_TIMEOUT_SECONDS = 30
+SPEECH_START_CONSECUTIVE_CHUNKS = 3
 
 # Diagnostic interval while testing headset disconnect/reconnect.
 AUDIO_HEALTH_INTERVAL_SECONDS = 60
@@ -45,6 +50,15 @@ AUDIO_RECONNECT_RETRY_SECONDS = 5
 # After Jarvis answers, remain available for natural follow-up
 # questions without requiring the wake word again.
 CONVERSATION_TIMEOUT_SECONDS = 30
+
+# Runtime-adjustable Jarvis settings.
+SETTINGS_FILE = Path(".jarvis_settings.json")
+
+DEFAULT_SETTINGS = {
+    # How long Jarvis gives another person in the room
+    # a chance to answer an overheard question.
+    "room_answer_delay": 2.0,
+}
 
 # "Hey, chill" temporarily suspends conversation mode.
 DEFAULT_CHILL_SECONDS = 5 * 60
@@ -79,10 +93,12 @@ def record_question():
     )
     pre_roll = deque(maxlen=pre_roll_chunks)
     speech_started = False
+    speech_start_hits = 0
     last_speech_time = None
     record_start_time = None
 
     print("Waiting for your question...")
+    wait_start_time = time.monotonic()
 
     with sd.InputStream(
         samplerate=SAMPLE_RATE,
@@ -104,9 +120,24 @@ def record_question():
             )
 
             if not speech_started:
+                if (
+                    time.monotonic() - wait_start_time
+                    >= SPEECH_START_TIMEOUT_SECONDS
+                ):
+                    print("No speech detected.")
+                    return False
+
                 pre_roll.append(audio.copy())
 
                 if score >= START_THRESHOLD:
+                    speech_start_hits += 1
+                else:
+                    speech_start_hits = 0
+
+                if (
+                    speech_start_hits
+                    >= SPEECH_START_CONSECUTIVE_CHUNKS
+                ):
                     speech_started = True
                     record_start_time = time.monotonic()
                     last_speech_time = record_start_time
@@ -244,6 +275,208 @@ def format_chill_duration(seconds):
     )
 
 
+def load_settings():
+    settings = DEFAULT_SETTINGS.copy()
+
+    if not SETTINGS_FILE.exists():
+        return settings
+
+    try:
+        saved = json.loads(SETTINGS_FILE.read_text())
+
+        for name in DEFAULT_SETTINGS:
+            if name in saved:
+                settings[name] = saved[name]
+
+    except Exception as exc:
+        print(
+            f"Could not load {SETTINGS_FILE}: "
+            f"{type(exc).__name__}: {exc}"
+        )
+
+    return settings
+
+
+def save_settings(settings):
+    SETTINGS_FILE.write_text(
+        json.dumps(settings, indent=2) + "\n"
+    )
+
+
+def format_seconds(value):
+    value = float(value)
+
+    if value.is_integer():
+        value = int(value)
+
+    return (
+        "1 second"
+        if value == 1
+        else f"{value} seconds"
+    )
+
+
+def handle_parameter_command(text, settings):
+    """
+    Returns True when text is a Jarvis parameter command.
+
+    Examples:
+      Set room answer delay to 3 seconds.
+      Update room answer delay to 2.5 seconds.
+      What is the room answer delay?
+    """
+    import re
+
+    normalized = normalize_command(text)
+
+    if normalized in {
+        "list parameters",
+        "list parameter",
+        "show parameters",
+        "show parameter",
+        "what are the parameters",
+    }:
+        room_delay = format_seconds(
+            settings["room_answer_delay"]
+        )
+
+        conversation_timeout = format_seconds(
+            CONVERSATION_TIMEOUT_SECONDS
+        )
+
+        default_sleep = format_chill_duration(
+            DEFAULT_CHILL_SECONDS
+        )
+
+        message = (
+            f"Room answer delay is {room_delay}. "
+            f"Follow-up timeout is {conversation_timeout}. "
+            f"Default sleep time is {default_sleep}."
+        )
+
+        print(message)
+        speak_home_assistant(message)
+
+        return True
+
+    query_match = re.fullmatch(
+        r"(?:what is|whats|tell me)"
+        r"(?: the)? room answer delay",
+        normalized,
+    )
+
+    if query_match:
+        value = settings["room_answer_delay"]
+        value_text = format_seconds(value)
+
+        print(
+            f"Room answer delay is {value_text}."
+        )
+
+        speak_home_assistant(
+            f"Room answer delay is {value_text}."
+        )
+
+        return True
+
+    update_match = re.fullmatch(
+        r"(?:set|sit|update)"
+        r"(?: parameter)?"
+        r"(?: the)? room answer delay"
+        r"(?: parameter)?"
+        r"(?: to)?"
+        r" (.+?)"
+        r"(?: second| seconds| sec| secs)?",
+        normalized,
+    )
+
+    if update_match:
+        value_text = update_match.group(1).strip()
+
+        spoken_numbers = {
+            "zero": 0,
+            "one": 1,
+            "two": 2,
+            "three": 3,
+            "four": 4,
+            "five": 5,
+            "six": 6,
+            "seven": 7,
+            "eight": 8,
+            "nine": 9,
+            "ten": 10,
+            "eleven": 11,
+            "twelve": 12,
+            "thirteen": 13,
+            "fourteen": 14,
+            "fifteen": 15,
+            "sixteen": 16,
+            "seventeen": 17,
+            "eighteen": 18,
+            "nineteen": 19,
+            "twenty": 20,
+            "twenty one": 21,
+            "twenty two": 22,
+            "twenty three": 23,
+            "twenty four": 24,
+            "twenty five": 25,
+            "twenty six": 26,
+            "twenty seven": 27,
+            "twenty eight": 28,
+            "twenty nine": 29,
+            "thirty": 30,
+        }
+
+        if value_text in spoken_numbers:
+            value = float(spoken_numbers[value_text])
+        else:
+            try:
+                value = float(value_text)
+            except ValueError:
+                print(
+                    "[PARAMETER PARSER] Value unclear; "
+                    "passing to AI."
+                )
+                return False
+
+    elif (
+        "room answer delay" in normalized
+        and normalized.startswith(
+            ("set ", "sit ", "update ")
+        )
+    ):
+        print(
+            "[PARAMETER PARSER] Command unclear; "
+            "passing to AI."
+        )
+        return False
+
+    else:
+        return False
+
+    if value < 0 or value > 30:
+        speak_home_assistant(
+            "Room answer delay must be between "
+            "zero and 30 seconds."
+        )
+        return True
+
+    settings["room_answer_delay"] = value
+    save_settings(settings)
+
+    value_text = format_seconds(value)
+
+    print(
+        f"Room answer delay updated to {value_text}."
+    )
+
+    speak_home_assistant(
+        f"Room answer delay updated to {value_text}."
+    )
+
+    return True
+
+
 def find_input_device():
     devices = sd.query_devices()
 
@@ -259,6 +492,13 @@ def find_input_device():
         f"Input device not found: {EXPECTED_INPUT_DEVICE}"
     )
 
+
+settings = load_settings()
+
+print(
+    "Room answer delay: "
+    f"{format_seconds(settings['room_answer_delay'])}"
+)
 
 shutdown_requested = False
 
@@ -398,9 +638,9 @@ while not shutdown_requested:
 
                 stream.stop()
 
-                speak_home_assistant("Yes.")
-                time.sleep(1.0)
-
+                # Start listening immediately after the wake word.
+                # This avoids clipping commands spoken naturally as:
+                # "Hey Jarvis, what time is it?"
                 try:
                     if record_question():
                         print("Transcribing...")
@@ -418,6 +658,13 @@ while not shutdown_requested:
                         print(f"You said: {text}")
 
                         normalized_text = normalize_command(text)
+
+                        if handle_parameter_command(
+                            text,
+                            settings,
+                        ):
+                            reconnect_requested = True
+                            break
 
                         if normalized_text in {
                             "exit",
@@ -573,7 +820,10 @@ while not shutdown_requested:
                             break
 
                         if text:
-                            answer = answer_climate_question(text)
+                            answer = answer_time_question(text)
+
+                            if answer is None:
+                                answer = answer_climate_question(text)
 
                             if answer is None:
                                 answer = answer_weather_question(text)
@@ -584,6 +834,93 @@ while not shutdown_requested:
                             print(f"Assistant: {answer}")
 
                             speak_home_assistant(answer)
+
+                            # Basic conversation follow-up mode.
+                            # After answering, listen for another question
+                            # without requiring the wake word.
+                            while not shutdown_requested:
+                                print(
+                                    "\nConversation mode: "
+                                    f"listening for up to "
+                                    f"{CONVERSATION_TIMEOUT_SECONDS} seconds..."
+                                )
+
+                                # record_question() normally uses the global
+                                # speech-start timeout. Temporarily use the
+                                # conversation timeout here.
+                                previous_timeout = (
+                                    SPEECH_START_TIMEOUT_SECONDS
+                                )
+                                SPEECH_START_TIMEOUT_SECONDS = (
+                                    CONVERSATION_TIMEOUT_SECONDS
+                                )
+
+                                try:
+                                    got_followup = record_question()
+                                finally:
+                                    SPEECH_START_TIMEOUT_SECONDS = (
+                                        previous_timeout
+                                    )
+
+                                if not got_followup:
+                                    print(
+                                        "Conversation timeout. "
+                                        "Returning to wake-word mode."
+                                    )
+                                    break
+
+                                print("Transcribing follow-up...")
+
+                                segments, info = whisper_model.transcribe(
+                                    WAV_FILE,
+                                    language="en",
+                                )
+
+                                followup_text = " ".join(
+                                    segment.text.strip()
+                                    for segment in segments
+                                ).strip()
+
+                                print(
+                                    f"Follow-up: {followup_text}"
+                                )
+
+                                if not followup_text:
+                                    continue
+
+                                followup_answer = (
+                                    answer_time_question(
+                                        followup_text
+                                    )
+                                )
+
+                                if followup_answer is None:
+                                    followup_answer = (
+                                        answer_climate_question(
+                                            followup_text
+                                        )
+                                    )
+
+                                if followup_answer is None:
+                                    followup_answer = (
+                                        answer_weather_question(
+                                            followup_text
+                                        )
+                                    )
+
+                                if followup_answer is None:
+                                    followup_answer = (
+                                        ask_anythingllm(
+                                            followup_text
+                                        )
+                                    )
+
+                                print(
+                                    f"Assistant: {followup_answer}"
+                                )
+                                speak_home_assistant(
+                                    followup_answer
+                                )
 
                 finally:
                     vad.reset_states()
