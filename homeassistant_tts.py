@@ -57,6 +57,11 @@ def _wait_for_tts_playback(
 
         if any(state == "playing" for state in states):
             saw_playing = True
+            print(
+                "[TIMING] "
+                f"tts_playback_detected="
+                f"{time.monotonic() - start:.3f}s"
+            )
             break
 
         time.sleep(PLAYBACK_POLL_SECONDS)
@@ -82,6 +87,11 @@ def _wait_for_tts_playback(
         ]
 
         if not any(state == "playing" for state in states):
+            print(
+                "[TIMING] "
+                f"tts_playback_duration="
+                f"{time.monotonic() - finish_start:.3f}s"
+            )
             return
 
         time.sleep(PLAYBACK_POLL_SECONDS)
@@ -122,6 +132,8 @@ def speak_home_assistant(message: str) -> None:
     else:
         targets = [audio_choice]
 
+    timing_tts_request_start = time.monotonic()
+
     response = requests.post(
         f"{ha_url}/api/services/tts/speak",
         headers=headers,
@@ -134,6 +146,14 @@ def speak_home_assistant(message: str) -> None:
     )
 
     response.raise_for_status()
+
+    timing_tts_request_done = time.monotonic()
+
+    print(
+        "[TIMING] "
+        f"tts_ha_request="
+        f"{timing_tts_request_done - timing_tts_request_start:.3f}s"
+    )
 
     _wait_for_tts_playback(
         ha_url,

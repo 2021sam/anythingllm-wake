@@ -13,6 +13,7 @@ from faster_whisper import WhisperModel
 from current_request import CurrentRequest
 from request_router import answer_question
 from conversation_service import CASUAL, ROOM_QUESTION, classify_utterance
+from utterance_extractor import extract_request
 from homeassistant_tts import speak_home_assistant
 
 
@@ -32,7 +33,7 @@ WAKE_THRESHOLD = 0.5
 
 # These values came from our microphone/VAD test.
 START_THRESHOLD = 0.008
-CONTINUE_THRESHOLD = 0.003
+CONTINUE_THRESHOLD = 0.015
 SILENCE_SECONDS = 0.8
 MAX_RECORD_SECONDS = 15
 PRE_ROLL_SECONDS = 0.4
@@ -49,7 +50,7 @@ AUDIO_RECONNECT_RETRY_SECONDS = 5
 
 # After Jarvis answers, remain available for natural follow-up
 # questions without requiring the wake word again.
-CONVERSATION_TIMEOUT_SECONDS = 30
+CONVERSATION_TIMEOUT_SECONDS = 10
 
 # Runtime-adjustable Jarvis settings.
 SETTINGS_FILE = Path(".jarvis_settings.json")
@@ -166,7 +167,10 @@ def human_speaks_during_room_delay(delay_seconds):
                     return True
 
 
-def record_question():
+def record_question(start_threshold=None):
+    if start_threshold is None:
+        start_threshold = START_THRESHOLD
+
     frames = []
     pre_roll_chunks = max(
         1,
@@ -180,6 +184,8 @@ def record_question():
 
     print("Waiting for your question...")
     wait_start_time = time.monotonic()
+    timing_speech_start = None
+    timing_last_speech = None
 
     with sd.InputStream(
         samplerate=SAMPLE_RATE,
@@ -210,7 +216,7 @@ def record_question():
 
                 pre_roll.append(audio.copy())
 
-                if score >= START_THRESHOLD:
+                if score >= start_threshold:
                     speech_start_hits += 1
                 else:
                     speech_start_hits = 0
@@ -222,6 +228,8 @@ def record_question():
                     speech_started = True
                     record_start_time = time.monotonic()
                     last_speech_time = record_start_time
+                    timing_speech_start = record_start_time
+                    timing_last_speech = record_start_time
 
                     frames.extend(pre_roll)
                     pre_roll.clear()
@@ -238,6 +246,7 @@ def record_question():
 
                 if score >= CONTINUE_THRESHOLD:
                     last_speech_time = now
+                    timing_last_speech = now
 
                 if (
                     now - last_speech_time
@@ -271,6 +280,29 @@ def record_question():
     duration = len(recorded) / SAMPLE_RATE
 
     print(f"Recorded {duration:.2f} seconds.")
+
+    timing_record_done = time.monotonic()
+
+    if (
+        timing_speech_start is not None
+        and timing_last_speech is not None
+    ):
+        speech_seconds = (
+            timing_last_speech - timing_speech_start
+        )
+        end_wait_seconds = (
+            timing_record_done - timing_last_speech
+        )
+        wait_for_speech_seconds = (
+            timing_speech_start - wait_start_time
+        )
+
+        print(
+            "[TIMING] "
+            f"wait_for_speech={wait_for_speech_seconds:.3f}s "
+            f"speech={speech_seconds:.3f}s "
+            f"end_silence+wav={end_wait_seconds:.3f}s"
+        )
 
     return True
 
@@ -726,6 +758,8 @@ while not shutdown_requested:
                     if record_question():
                         print("Transcribing...")
 
+                        timing_whisper_start = time.monotonic()
+
                         segments, info = whisper_model.transcribe(
                             WAV_FILE,
                             language="en",
@@ -735,6 +769,13 @@ while not shutdown_requested:
                             segment.text.strip()
                             for segment in segments
                         ).strip()
+
+                        timing_whisper_done = time.monotonic()
+                        print(
+                            "[TIMING] "
+                            f"whisper="
+                            f"{timing_whisper_done - timing_whisper_start:.3f}s"
+                        )
 
                         print(f"You said: {text}")
 
@@ -956,14 +997,43 @@ while not shutdown_requested:
                             break
 
                         if text:
+                            request_text = extract_request(text)
+
+                            if request_text != text:
+                                print(
+                                    f"[REQUEST] Using: {request_text}"
+                                )
+                                print(
+                                    "[REQUEST] Ignored trailing speech: "
+                                    f"{text[len(request_text):].strip()}"
+                                )
+
+                            timing_answer_start = time.monotonic()
+
                             answer = answer_question(
-                                text,
+                                request_text,
                                 current_request,
+                            )
+
+                            timing_answer_done = time.monotonic()
+
+                            print(
+                                "[TIMING] "
+                                f"answer_question="
+                                f"{timing_answer_done - timing_answer_start:.3f}s"
                             )
 
                             print(f"Assistant: {answer}")
 
+                            timing_tts_start = time.monotonic()
                             speak_home_assistant(answer)
+                            timing_tts_done = time.monotonic()
+
+                            print(
+                                "[TIMING] "
+                                f"tts_call="
+                                f"{timing_tts_done - timing_tts_start:.3f}s"
+                            )
 
                             # Basic conversation follow-up mode.
                             # After answering, listen for another question
@@ -986,7 +1056,9 @@ while not shutdown_requested:
                                 )
 
                                 try:
-                                    got_followup = record_question()
+                                    got_followup = record_question(
+                                        start_threshold=0.025,
+                                    )
                                 finally:
                                     SPEECH_START_TIMEOUT_SECONDS = (
                                         previous_timeout

@@ -1,9 +1,16 @@
 from pathlib import Path
 import json
+import time
+import uuid
 import requests
 
 BASE_URL = "http://localhost:3001"
 WORKSPACE_SLUG = "my-workspace"
+
+# Keep conversational context only for the lifetime of this Jarvis process.
+# A restart gets a fresh AnythingLLM API session so old room speech and
+# previous conversations do not inflate every future prompt.
+CONVERSATION_SESSION_ID = f"jarvis-{uuid.uuid4().hex}"
 
 API_KEY_FILE = Path(__file__).parent / ".anythingllm_api_key"
 
@@ -160,6 +167,8 @@ Speech transcript:
 def ask_anythingllm(message: str) -> str:
     api_key = API_KEY_FILE.read_text().strip()
 
+    timing_http_start = time.monotonic()
+
     response = requests.post(
         f"{BASE_URL}/api/v1/workspace/{WORKSPACE_SLUG}/chat",
         headers={
@@ -169,14 +178,23 @@ def ask_anythingllm(message: str) -> str:
         json={
             "message": message,
             "mode": "chat",
-            "sessionId": "jarvis-conversation",
+            "sessionId": CONVERSATION_SESSION_ID,
         },
         timeout=60,
     )
 
     response.raise_for_status()
 
+    timing_http_done = time.monotonic()
+
     data = response.json()
+
+    print(
+        "[TIMING] "
+        f"anythingllm_http="
+        f"{timing_http_done - timing_http_start:.3f}s"
+    )
+
     return data["textResponse"]
 
 
