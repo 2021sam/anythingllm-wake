@@ -56,6 +56,7 @@ def _requests_all_lights(text: str) -> bool:
 def answer_device_command(
     message: str,
     current_request=None,
+    allow_natural_fallback: bool = False,
 ) -> str | None:
     """
     Handle deterministic Home Assistant device-control commands.
@@ -192,13 +193,16 @@ def answer_device_command(
         )
 
     if not turn_on and not turn_off:
-        # The utterance resolved to a real registered device, but it
-        # was not an actionable on/off command. Do not pass the device
-        # reference to AnythingLLM, because the LLM must not invent
-        # device state, configuration, capabilities, or actions.
+        # The utterance resolved to a registered device but the
+        # deterministic parser did not understand the requested action.
         #
-        # Actual device-state questions will get their own deterministic
-        # Home Assistant read path.
+        # The request router may now give the safe natural-language
+        # device interpreter a chance to understand it. This is NOT
+        # ordinary AnythingLLM fallback; any resulting action still
+        # requires deterministic validation before Home Assistant.
+        if allow_natural_fallback:
+            return None
+
         room = device["room"]
         name = device["name"].lower()
 
@@ -238,3 +242,87 @@ def answer_device_command(
     )
 
     return f"Turning {action} the {room} {name}."
+
+
+def execute_validated_device_intent(
+    validated: dict,
+    current_request=None,
+) -> str | None:
+    """
+    Execute a device intent only after it passed the deterministic validator.
+
+    The AI never supplies an entity ID. The entity ID always comes from
+    the trusted device registry through the validated device object.
+    """
+    if not validated.get("allowed"):
+        return None
+
+    device = validated["device"]
+    action = validated["action"]
+    device_key = validated["device_key"]
+
+    entity_id = device["entity_id"]
+    room = device["room"]
+    name = device["name"].lower()
+
+    client = HomeAssistantClient()
+
+    if action == "turn_on":
+        client.turn_on(entity_id)
+        response = f"Turning on the {room} {name}."
+
+    elif action == "turn_off":
+        client.turn_off(entity_id)
+        response = f"Turning off the {room} {name}."
+
+    elif action == "get_state":
+        entity = client.get_state(entity_id)
+        state = entity.get("state", "unknown")
+
+        if state in ("on", "off"):
+            response = f"The {room} {name} is {state}."
+        elif state == "unavailable":
+            response = (
+                f"The {room} {name} is currently unavailable."
+            )
+        else:
+            response = (
+                f"The {room} {name} currently reports {state}."
+            )
+
+    elif action == "set_brightness":
+        brightness_percent = validated["brightness_percent"]
+
+        # Home Assistant light brightness uses the range 0-255.
+        # The validator guarantees a percentage from 1-100.
+        brightness = round(
+            255 * brightness_percent / 100
+        )
+
+        client.call_service(
+            "light",
+            "turn_on",
+            {
+                "entity_id": entity_id,
+                "brightness": brightness,
+            },
+        )
+
+        response = (
+            f"Setting the {room} {name} to "
+            f"{brightness_percent}%."
+        )
+
+    else:
+        # Defense in depth. The validator should make this unreachable.
+        return None
+
+    if current_request is not None:
+        current_request.device_key = device_key
+
+    print(
+        f"[NATURAL DEVICE] "
+        f"{device_key} -> {entity_id} -> {action}"
+    )
+
+    return response
