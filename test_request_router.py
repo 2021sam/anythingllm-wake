@@ -131,3 +131,34 @@ with (
 
 
 print("ALL REQUEST ROUTER TESTS PASSED")
+
+
+#
+# Training Mode must stay deterministic and never reach AnythingLLM.
+#
+with (
+    patch(
+        "request_router.answer_training_mode_command",
+        return_value="Training Mode is on.",
+    ) as training_mock,
+    patch(
+        "request_router.answer_device_command",
+    ) as device_mock,
+    patch(
+        "request_router.ask_anythingllm",
+    ) as llm_mock,
+):
+    answer = answer_question(
+        "Turn on Training Mode.",
+        CurrentRequest(),
+    )
+
+    assert answer == "Training Mode is on."
+    training_mock.assert_called_once_with(
+        "Turn on Training Mode."
+    )
+    device_mock.assert_not_called()
+    llm_mock.assert_not_called()
+
+
+print("ALL TRAINING MODE ROUTER TESTS PASSED")
