@@ -7,6 +7,7 @@ from device_control import (
 from device_intent import interpret_device_intent
 from device_intent_validator import validate_device_intent
 from device_registry import DEVICES
+from device_training import answer_training_mode_command
 from time_service import answer_time_question
 from weather_service import (
     answer_climate_question,
@@ -24,6 +25,13 @@ def answer_question(message, current_request):
 
     Otherwise preserve Jarvis's previous routing behavior.
     """
+
+    # Training Mode is deterministic and must never fall through to
+    # device interpretation or AnythingLLM.
+    answer = answer_training_mode_command(message)
+
+    if answer is not None:
+        return answer
 
     # Obvious Home Assistant device commands take the deterministic
     # fast path and never need AnythingLLM.

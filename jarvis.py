@@ -15,6 +15,7 @@ from request_router import answer_question
 from conversation_service import CASUAL, ROOM_QUESTION, classify_utterance
 from utterance_extractor import extract_request
 from homeassistant_tts import speak_home_assistant
+from device_monitor_runtime import start_device_monitor_thread
 from physical_light_discovery import (
     describe_missed_physical_switch,
 )
@@ -101,6 +102,8 @@ whisper_model = WhisperModel(
     device="cpu",
     compute_type="int8",
 )
+
+device_monitor_thread = start_device_monitor_thread()
 
 print("Listening for: HEY JARVIS")
 print("Press Ctrl+C to stop.")

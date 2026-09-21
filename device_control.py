@@ -6,6 +6,7 @@ from device_registry import (
     resolve_device,
 )
 from homeassistant_client import HomeAssistantClient
+from device_action_tracker import ACTION_TRACKER
 
 
 def _looks_like_home_control_command(text: str) -> bool:
@@ -227,10 +228,20 @@ def answer_device_command(
     entity_id = device["entity_id"]
 
     if turn_on:
-        client.turn_on(entity_id)
+        ACTION_TRACKER.expect(entity_id, "on")
+        try:
+            client.turn_on(entity_id)
+        except Exception:
+            ACTION_TRACKER.clear(entity_id)
+            raise
         action = "on"
     else:
-        client.turn_off(entity_id)
+        ACTION_TRACKER.expect(entity_id, "off")
+        try:
+            client.turn_off(entity_id)
+        except Exception:
+            ACTION_TRACKER.clear(entity_id)
+            raise
         action = "off"
 
     if current_request is not None:
@@ -274,11 +285,21 @@ def execute_validated_device_intent(
     client = HomeAssistantClient()
 
     if action == "turn_on":
-        client.turn_on(entity_id)
+        ACTION_TRACKER.expect(entity_id, "on")
+        try:
+            client.turn_on(entity_id)
+        except Exception:
+            ACTION_TRACKER.clear(entity_id)
+            raise
         response = f"Turning on the {room} {name}."
 
     elif action == "turn_off":
-        client.turn_off(entity_id)
+        ACTION_TRACKER.expect(entity_id, "off")
+        try:
+            client.turn_off(entity_id)
+        except Exception:
+            ACTION_TRACKER.clear(entity_id)
+            raise
         response = f"Turning off the {room} {name}."
 
     elif action == "get_state":
@@ -305,14 +326,24 @@ def execute_validated_device_intent(
             255 * brightness_percent / 100
         )
 
-        client.call_service(
-            "light",
-            "turn_on",
-            {
-                "entity_id": entity_id,
-                "brightness": brightness,
-            },
+        ACTION_TRACKER.expect(
+            entity_id,
+            "on",
+            brightness=brightness,
         )
+
+        try:
+            client.call_service(
+                "light",
+                "turn_on",
+                {
+                    "entity_id": entity_id,
+                    "brightness": brightness,
+                },
+            )
+        except Exception:
+            ACTION_TRACKER.clear(entity_id)
+            raise
 
         response = (
             f"Setting the {room} {name} to "
