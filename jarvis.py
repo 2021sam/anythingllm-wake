@@ -15,6 +15,10 @@ from request_router import answer_question
 from conversation_service import CASUAL, ROOM_QUESTION, classify_utterance
 from utterance_extractor import extract_request
 from homeassistant_tts import speak_home_assistant
+from device_discovery import (
+    is_physical_light_discovery_request,
+    watch_for_light_change,
+)
 
 
 current_request = CurrentRequest()
@@ -33,7 +37,7 @@ WAKE_THRESHOLD = 0.5
 
 # These values came from our microphone/VAD test.
 START_THRESHOLD = 0.008
-CONTINUE_THRESHOLD = 0.015
+CONTINUE_THRESHOLD = 0.006
 SILENCE_SECONDS = 0.8
 MAX_RECORD_SECONDS = 15
 PRE_ROLL_SECONDS = 0.4
@@ -1008,32 +1012,99 @@ while not shutdown_requested:
                                     f"{text[len(request_text):].strip()}"
                                 )
 
-                            timing_answer_start = time.monotonic()
+                            # Physical light discovery is interactive:
+                            # speak first, then watch Home Assistant while
+                            # the person operates the physical switch.
+                            if is_physical_light_discovery_request(
+                                request_text
+                            ):
+                                discovery_prompt = "Flick the switch."
 
-                            answer = answer_question(
-                                request_text,
-                                current_request,
-                            )
+                                print(
+                                    f"Assistant: {discovery_prompt}"
+                                )
+                                speak_home_assistant(
+                                    discovery_prompt
+                                )
 
-                            timing_answer_done = time.monotonic()
+                                change = watch_for_light_change()
 
-                            print(
-                                "[TIMING] "
-                                f"answer_question="
-                                f"{timing_answer_done - timing_answer_start:.3f}s"
-                            )
+                                if change is None:
+                                    answer = (
+                                        "I didn't detect that switch. "
+                                        "Is the light on now?"
+                                    )
 
-                            print(f"Assistant: {answer}")
+                                elif change.get("multiple"):
+                                    answer = (
+                                        "I detected more than one "
+                                        "light changing. Flick the same "
+                                        "switch again."
+                                    )
 
-                            timing_tts_start = time.monotonic()
-                            speak_home_assistant(answer)
-                            timing_tts_done = time.monotonic()
+                                elif change.get("friendly_name"):
+                                    friendly_name = change[
+                                        "friendly_name"
+                                    ]
 
-                            print(
-                                "[TIMING] "
-                                f"tts_call="
-                                f"{timing_tts_done - timing_tts_start:.3f}s"
-                            )
+                                    answer = (
+                                        f"That's the "
+                                        f"{friendly_name}."
+                                    )
+
+                                    # Preserve conversational device
+                                    # context for any registered device.
+                                    if change.get("device_key"):
+                                        current_request.device_key = (
+                                            change["device_key"]
+                                        )
+
+                                else:
+                                    answer = (
+                                        "I detected "
+                                        f"{change['entity_id']}, "
+                                        "but I don't have a room name "
+                                        "for it yet."
+                                    )
+
+                                print(f"Assistant: {answer}")
+                                speak_home_assistant(answer)
+
+                                # Discovery already produced and spoke
+                                # the complete answer. Continue directly
+                                # into conversation mode rather than
+                                # calling AnythingLLM.
+                                timing_answer_start = None
+                                timing_answer_done = None
+
+                            else:
+                                timing_answer_start = time.monotonic()
+
+                                answer = answer_question(
+                                    request_text,
+                                    current_request,
+                                )
+
+                                timing_answer_done = time.monotonic()
+
+                            if timing_answer_start is not None:
+                                print(
+                                    "[TIMING] "
+                                    f"answer_question="
+                                    f"{timing_answer_done - timing_answer_start:.3f}s"
+                                )
+
+                                print(f"Assistant: {answer}")
+
+                                timing_tts_start = time.monotonic()
+                                speak_home_assistant(answer)
+                                timing_tts_done = time.monotonic()
+
+                                print(
+                                    "[TIMING] "
+                                    f"tts_call="
+                                    f"{timing_tts_done - timing_tts_start:.3f}s"
+                                )
 
                             # Basic conversation follow-up mode.
                             # After answering, listen for another question

@@ -14,6 +14,7 @@ DEVICES = {
         "aliases": [
             "family room light",
             "family room lights",
+            "family room",
         ],
     },
 }
@@ -27,6 +28,17 @@ def get_device_key(device: dict) -> str | None:
     """Return the registry key for a device object."""
     for device_key, registered_device in DEVICES.items():
         if registered_device is device:
+            return device_key
+
+    return None
+
+
+def get_device_key_by_entity_id(
+    entity_id: str,
+) -> str | None:
+    """Return the registry key for a Home Assistant entity ID."""
+    for device_key, device in DEVICES.items():
+        if device["entity_id"] == entity_id:
             return device_key
 
     return None

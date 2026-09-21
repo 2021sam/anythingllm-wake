@@ -22,16 +22,53 @@ def answer_device_command(
 
     device = resolve_device(message)
 
-    # Resolve conversational commands such as "Turn it off."
+    # Resolve contextual commands such as:
+    #   "Turn it off."
+    #   "Turn that off."
+    #   "Turn off."
+    #
+    # A bare on/off command may use the current device only when a
+    # previous deterministic device command established that context.
+    contextual_device_command = bool(
+        re.fullmatch(
+            r"(?:turn|switch)\s+"
+            r"(?:(?:it|that)\s+)?"
+            r"(?:on|off)[.!?]*",
+            text,
+        )
+    )
+
     if (
         device is None
         and current_request is not None
         and current_request.device_key
-        and re.search(r"\b(?:it|that)\b", text)
+        and (
+            re.search(r"\b(?:it|that)\b", text)
+            or contextual_device_command
+        )
     ):
         device = get_device(current_request.device_key)
 
+    # Device-looking commands must never fall through to AnythingLLM.
+    # If there is no known target, ask for it instead of allowing the
+    # LLM to invent devices or claim that an action occurred.
+    incomplete_device_command = bool(
+        re.fullmatch(
+            r"(?:turn|switch)\s+"
+            r"(?:(?:it|that)\s+)?"
+            r"(?:on|off)[.!?]*",
+            text,
+        )
+    )
+
     if device is None:
+        if incomplete_device_command:
+            return (
+                "Turn on what?"
+                if re.search(r"\bon\b", text)
+                else "Turn off what?"
+            )
+
         return None
 
     turn_on = bool(
@@ -44,8 +81,75 @@ def answer_device_command(
         or re.search(r"\bswitch\s+(?:it\s+)?off\b", text)
     )
 
+    # Questions about a registered device must read the real state
+    # from Home Assistant rather than asking AnythingLLM.
+    state_question = bool(
+        re.search(
+            r"\b(?:is|are)\b.*\b(?:on|off)\b",
+            text,
+        )
+        or re.search(
+            r"\bstate\b",
+            text,
+        )
+        or re.search(
+            r"\bstatus\b",
+            text,
+        )
+    )
+
+    if state_question:
+        client = HomeAssistantClient()
+        entity = client.get_state(device["entity_id"])
+        state = entity.get("state", "unknown")
+
+        room = device["room"]
+        name = device["name"].lower()
+
+        if current_request is not None:
+            device_key = get_device_key(device)
+
+            if device_key is not None:
+                current_request.device_key = device_key
+
+        print(
+            f"[DEVICE STATE] {message!r} -> "
+            f"{device['entity_id']} -> {state}"
+        )
+
+        if state in ("on", "off"):
+            return f"The {room} {name} is {state}."
+
+        if state == "unavailable":
+            return (
+                f"The {room} {name} is currently unavailable."
+            )
+
+        return (
+            f"The {room} {name} currently reports {state}."
+        )
+
     if not turn_on and not turn_off:
-        return None
+        # The utterance resolved to a real registered device, but it
+        # was not an actionable on/off command. Do not pass the device
+        # reference to AnythingLLM, because the LLM must not invent
+        # device state, configuration, capabilities, or actions.
+        #
+        # Actual device-state questions will get their own deterministic
+        # Home Assistant read path.
+        room = device["room"]
+        name = device["name"].lower()
+
+        if current_request is not None:
+            device_key = get_device_key(device)
+
+            if device_key is not None:
+                current_request.device_key = device_key
+
+        return (
+            f"What would you like me to do with the "
+            f"{room} {name}?"
+        )
 
     client = HomeAssistantClient()
     entity_id = device["entity_id"]
