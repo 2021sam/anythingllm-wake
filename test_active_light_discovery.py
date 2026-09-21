@@ -120,6 +120,18 @@ assert is_active_light_discovery_request(
 assert is_active_light_discovery_request(
     "Which light is which?"
 )
+assert is_active_light_discovery_request(
+    "How do you test the light switches?"
+)
+assert is_active_light_discovery_request(
+    "Can you test the light switches?"
+)
+assert is_active_light_discovery_request(
+    "How do we identify the light switches?"
+)
+assert is_active_light_discovery_request(
+    "Identify the light switches."
+)
 
 assert not is_active_light_discovery_request(
     "Turn on the Family Room light."
@@ -135,6 +147,12 @@ for phrase in (
     "Yes",
     "Yeah",
     "Yep",
+    "Hell yeah",
+    "Hell yeah!",
+    "Absolutely",
+    "Definitely",
+    "Sure",
+    "For sure",
     "That one",
     "I saw it",
     "It flicked",

@@ -264,13 +264,18 @@ def is_active_light_discovery_request(message: str) -> bool:
     """
     text = message.strip().lower()
 
+    device_words = r"(?:lights?|dimmers?|light switches?)"
+
     patterns = [
-        r"\bidentify (?:the )?(?:lights?|dimmers?)\b",
-        r"\bfind (?:the )?(?:lights?|dimmers?)\b",
-        r"\btest (?:the )?(?:lights?|dimmers?)\b",
-        r"\bcycle through (?:the )?(?:lights?|dimmers?)\b",
-        r"\bshow me (?:the )?(?:lights?|dimmers?)\b",
-        r"\bwhich (?:light|dimmer) is which\b",
+        rf"\bidentify (?:the )?{device_words}\b",
+        rf"\bfind (?:the )?{device_words}\b",
+        rf"\btest (?:the )?{device_words}\b",
+        rf"\bcycle through (?:the )?{device_words}\b",
+        rf"\bshow me (?:the )?{device_words}\b",
+        r"\bwhich (?:light|dimmer|light switch) is which\b",
+        rf"\bhow (?:do|would) (?:you|i|we) test (?:the )?{device_words}\b",
+        rf"\bhow (?:do|can) (?:you|i|we) identify (?:the )?{device_words}\b",
+        rf"\bfigure out (?:which|what) {device_words}\b",
     ]
 
     return any(re.search(pattern, text) for pattern in patterns)
@@ -292,6 +297,11 @@ def parse_active_discovery_confirmation(message: str) -> bool | None:
         "yeah",
         "yep",
         "yup",
+        "hell yeah",
+        "absolutely",
+        "definitely",
+        "sure",
+        "for sure",
         "yes it did",
         "yeah it did",
         "that one",
