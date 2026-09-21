@@ -15,11 +15,15 @@ from request_router import answer_question
 from conversation_service import CASUAL, ROOM_QUESTION, classify_utterance
 from utterance_extractor import extract_request
 from homeassistant_tts import speak_home_assistant
+from physical_light_discovery import (
+    describe_missed_physical_switch,
+)
 from light_discovery_conversation import (
     ACTIVE,
     PHYSICAL,
     parse_discovery_confirmation,
     parse_discovery_option,
+    parse_light_state_confirmation,
     wants_light_control_explanation,
 )
 from device_discovery import (
@@ -493,6 +497,12 @@ def run_physical_light_discovery():
             "I didn't detect that switch. "
             "Is the light on now?"
         )
+
+        print(f"Assistant: {answer}")
+        speak_home_assistant(answer)
+
+        response = listen_for_light_discovery_response()
+        answer = describe_missed_physical_switch(response)
 
     elif change.get("multiple"):
         answer = (
