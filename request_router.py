@@ -1,5 +1,6 @@
 from anythingllm_client import ask_anythingllm
 from current_request import update_current_request
+from device_control import answer_device_command
 from time_service import answer_time_question
 from weather_service import (
     answer_climate_question,
@@ -17,6 +18,16 @@ def answer_question(message, current_request):
 
     Otherwise preserve Jarvis's previous routing behavior.
     """
+
+    # Obvious Home Assistant device commands take the deterministic
+    # fast path and never need AnythingLLM.
+    answer = answer_device_command(
+        message,
+        current_request,
+    )
+
+    if answer is not None:
+        return answer
 
     if update_current_request(current_request, message):
         canonical = current_request.canonical_text()
