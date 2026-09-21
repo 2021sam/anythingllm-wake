@@ -8,6 +8,51 @@ from device_registry import (
 from homeassistant_client import HomeAssistantClient
 
 
+def _looks_like_home_control_command(text: str) -> bool:
+    """
+    Return True when speech resembles a device-control command.
+
+    Unresolved commands are handled locally rather than sent to
+    AnythingLLM. This prevents invented device actions.
+
+    Whole-house/all-lights control is intentionally unsupported.
+    """
+    normalized = text.strip().lower()
+
+    control_patterns = [
+        r"\bturn\s+(?:on|off)\b",
+        r"\bswitch\s+(?:on|off)\b",
+        r"\b(?:lights?|lamps?)\s+(?:on|off)\b",
+    ]
+
+    return any(
+        re.search(pattern, normalized)
+        for pattern in control_patterns
+    )
+
+
+def _requests_all_lights(text: str) -> bool:
+    """
+    Detect whole-house or all-light requests.
+
+    Jarvis intentionally does not execute these commands.
+    """
+    normalized = text.strip().lower()
+
+    patterns = [
+        r"\ball\s+(?:the\s+)?lights?\b",
+        r"\bevery\s+light\b",
+        r"\bevery\s+light\s+in\s+the\s+house\b",
+        r"\bwhole\s+house\b.*\blights?\b",
+        r"\blights?\b.*\bwhole\s+house\b",
+    ]
+
+    return any(
+        re.search(pattern, normalized)
+        for pattern in patterns
+    )
+
+
 def answer_device_command(
     message: str,
     current_request=None,
@@ -19,6 +64,14 @@ def answer_device_command(
     Pronouns such as "it" can then resolve to that device.
     """
     text = message.strip().lower()
+
+    # Never execute whole-house/all-lights commands.
+    # Jarvis requires a specific registered room/device.
+    if _requests_all_lights(text):
+        return (
+            "I won't control all the lights at once. "
+            "Please name a specific room or light."
+        )
 
     device = resolve_device(message)
 
@@ -67,6 +120,15 @@ def answer_device_command(
                 "Turn on what?"
                 if re.search(r"\bon\b", text)
                 else "Turn off what?"
+            )
+
+        # Speech that still resembles a home-control command must
+        # never fall through to AnythingLLM. The LLM is not allowed
+        # to invent a device, automation, or successful action.
+        if _looks_like_home_control_command(text):
+            return (
+                "Which specific room or light would you like "
+                "me to control?"
             )
 
         return None
