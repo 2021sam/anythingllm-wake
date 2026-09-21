@@ -41,6 +41,7 @@ DIRECT_REQUEST_PREFIXES = (
     "check ",
     "turn ",
     "set ",
+    "dim ",
     "play ",
     "stop ",
     "pause ",
