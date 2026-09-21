@@ -76,3 +76,33 @@ for phrase in (
 assert parse_discovery_confirmation("maybe") is None
 
 print("ALL LIGHT DISCOVERY CONVERSATION TESTS PASSED")
+
+# Natural answers to a contextual physical-light state question.
+from light_discovery_conversation import parse_light_state_confirmation
+
+for phrase in (
+    "Yes",
+    "Yeah",
+    "Uh, yeah.",
+    "Yep",
+    "It's on.",
+    "The light is on.",
+):
+    assert parse_light_state_confirmation(phrase) is True, phrase
+
+for phrase in (
+    "No",
+    "Nope",
+    "Uh, no.",
+    "It's off.",
+    "The light is off.",
+):
+    assert parse_light_state_confirmation(phrase) is False, phrase
+
+for phrase in (
+    "Maybe",
+    "I don't know",
+):
+    assert parse_light_state_confirmation(phrase) is None, phrase
+
+print("ALL PHYSICAL LIGHT STATE RESPONSE TESTS PASSED")

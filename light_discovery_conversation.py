@@ -75,6 +75,59 @@ def parse_discovery_option(message: str) -> str | None:
     return None
 
 
+def parse_light_state_confirmation(message: str) -> bool | None:
+    """
+    Parse a natural answer to a contextual light-state question such as
+    "Is the light on now?"
+    """
+    text = _normalize(message)
+
+    yes = {
+        "yes",
+        "yeah",
+        "yep",
+        "yup",
+        "uh yeah",
+        "oh yeah",
+        "yes it is",
+        "yeah it is",
+        "it is",
+        "it's on",
+        "its on",
+        "the light is on",
+        "it is on",
+        "yeah it's on",
+        "yeah its on",
+        "yes it's on",
+        "yes its on",
+    }
+
+    no = {
+        "no",
+        "nope",
+        "nah",
+        "uh no",
+        "no it isn't",
+        "no it isnt",
+        "it isn't",
+        "it isnt",
+        "it's off",
+        "its off",
+        "the light is off",
+        "it is off",
+        "no it's off",
+        "no its off",
+    }
+
+    if text in yes:
+        return True
+
+    if text in no:
+        return False
+
+    return None
+
+
 def parse_discovery_confirmation(message: str) -> bool | None:
     text = _normalize(message)
 

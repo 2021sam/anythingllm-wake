@@ -23,6 +23,12 @@ def _looks_like_home_control_command(text: str) -> bool:
         r"\bturn\s+(?:on|off)\b",
         r"\bswitch\s+(?:on|off)\b",
         r"\b(?:lights?|lamps?)\s+(?:on|off)\b",
+
+        # Broad imperative home-control requests must also stay inside
+        # Jarvis's deterministic device layer. AnythingLLM is never
+        # allowed to invent or claim successful Home Assistant actions.
+        r"^(?:control|operate)\s+(?:the\s+)?"
+        r"(?:lights?|light switches?|dimmers?)\b",
     ]
 
     return any(

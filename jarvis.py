@@ -15,11 +15,15 @@ from request_router import answer_question
 from conversation_service import CASUAL, ROOM_QUESTION, classify_utterance
 from utterance_extractor import extract_request
 from homeassistant_tts import speak_home_assistant
+from physical_light_discovery import (
+    describe_missed_physical_switch,
+)
 from light_discovery_conversation import (
     ACTIVE,
     PHYSICAL,
     parse_discovery_confirmation,
     parse_discovery_option,
+    parse_light_state_confirmation,
     wants_light_control_explanation,
 )
 from device_discovery import (
@@ -364,6 +368,35 @@ def listen_for_light_discovery_response():
     return response_text
 
 
+def handle_light_discovery_request(message):
+    """
+    Handle light-discovery/capability requests from either the initial
+    wake-word request or an active conversation follow-up.
+
+    Returns True when this request was fully handled here.
+    """
+    if wants_light_control_explanation(message):
+        discovery_method = choose_light_discovery_method()
+
+        if discovery_method == ACTIVE:
+            run_active_light_discovery()
+
+        elif discovery_method == PHYSICAL:
+            run_physical_light_discovery()
+
+        return True
+
+    if is_active_light_discovery_request(message):
+        run_active_light_discovery()
+        return True
+
+    if is_physical_light_discovery_request(message):
+        run_physical_light_discovery()
+        return True
+
+    return False
+
+
 def run_active_light_discovery():
     """
     Cycle through available smart dimmers one at a time.
@@ -464,6 +497,12 @@ def run_physical_light_discovery():
             "I didn't detect that switch. "
             "Is the light on now?"
         )
+
+        print(f"Assistant: {answer}")
+        speak_home_assistant(answer)
+
+        response = listen_for_light_discovery_response()
+        answer = describe_missed_physical_switch(response)
 
     elif change.get("multiple"):
         answer = (
@@ -1321,45 +1360,11 @@ while not shutdown_requested:
                                     f"{text[len(request_text):].strip()}"
                                 )
 
-                            # A general question about controlling or
-                            # identifying lights starts a conversational
-                            # choice. No device is operated until the person
-                            # selects a method and confirms it.
-                            if wants_light_control_explanation(
+                            # Use the same deterministic discovery router
+                            # for initial requests and conversation follow-ups.
+                            if handle_light_discovery_request(
                                 request_text
                             ):
-                                discovery_method = (
-                                    choose_light_discovery_method()
-                                )
-
-                                if discovery_method == ACTIVE:
-                                    run_active_light_discovery()
-
-                                elif discovery_method == PHYSICAL:
-                                    run_physical_light_discovery()
-
-                                timing_answer_start = None
-                                timing_answer_done = None
-
-                            # An explicit active-discovery request is already
-                            # a direct instruction, so run the tested active
-                            # discovery flow without asking the same question
-                            # twice.
-                            elif is_active_light_discovery_request(
-                                request_text
-                            ):
-                                run_active_light_discovery()
-
-                                timing_answer_start = None
-                                timing_answer_done = None
-
-                            # Preserve the original physical-switch discovery
-                            # behavior for explicit physical requests.
-                            elif is_physical_light_discovery_request(
-                                request_text
-                            ):
-                                run_physical_light_discovery()
-
                                 timing_answer_start = None
                                 timing_answer_done = None
 
@@ -1473,6 +1478,15 @@ while not shutdown_requested:
                                         break
 
                                 if not followup_text:
+                                    continue
+
+                                # Discovery/capability questions must use the
+                                # same deterministic router as the initial
+                                # wake-word request. Never send these directly
+                                # to AnythingLLM.
+                                if handle_light_discovery_request(
+                                    followup_text
+                                ):
                                     continue
 
                                 followup_kind = classify_utterance(
