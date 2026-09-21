@@ -17,6 +17,20 @@ DEVICES = {
             "family room",
         ],
     },
+    "front_left_bedroom_light": {
+        "room": "Front Left Bedroom",
+        "name": "Light",
+        "domain": "light",
+        "entity_id": "light.wall_dimmer_2",
+        "aliases": [
+            "front left bedroom light",
+            "front left bedroom lights",
+            "front left bedroom",
+            "left front bedroom light",
+            "left front bedroom lights",
+            "left front bedroom",
+        ],
+    },
 }
 
 

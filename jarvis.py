@@ -16,7 +16,12 @@ from conversation_service import CASUAL, ROOM_QUESTION, classify_utterance
 from utterance_extractor import extract_request
 from homeassistant_tts import speak_home_assistant
 from device_discovery import (
+    active_candidate_announcement,
+    flick_light_candidate,
+    get_active_light_candidates,
+    is_active_light_discovery_request,
     is_physical_light_discovery_request,
+    parse_active_discovery_confirmation,
     watch_for_light_change,
 )
 
@@ -309,6 +314,48 @@ def record_question(start_threshold=None):
         )
 
     return True
+
+
+def listen_for_active_discovery_confirmation():
+    """
+    Listen for a short yes/no response during active light discovery.
+
+    Returns:
+        True  - person saw the tested light flick
+        False - person did not see it
+        None  - no speech or unclear response
+    """
+    global SPEECH_START_TIMEOUT_SECONDS
+
+    previous_timeout = SPEECH_START_TIMEOUT_SECONDS
+    SPEECH_START_TIMEOUT_SECONDS = CONVERSATION_TIMEOUT_SECONDS
+
+    try:
+        got_response = record_question(start_threshold=0.025)
+    finally:
+        SPEECH_START_TIMEOUT_SECONDS = previous_timeout
+
+    if not got_response:
+        return None
+
+    print("Transcribing discovery response...")
+
+    segments, info = whisper_model.transcribe(
+        WAV_FILE,
+        language="en",
+    )
+
+    response_text = " ".join(
+        segment.text.strip()
+        for segment in segments
+    ).strip()
+
+    print(
+        f"[ACTIVE DISCOVERY] Human response: "
+        f"{response_text!r}"
+    )
+
+    return parse_active_discovery_confirmation(response_text)
 
 
 def normalize_command(text):
@@ -1012,10 +1059,145 @@ while not shutdown_requested:
                                     f"{text[len(request_text):].strip()}"
                                 )
 
-                            # Physical light discovery is interactive:
-                            # speak first, then watch Home Assistant while
-                            # the person operates the physical switch.
-                            if is_physical_light_discovery_request(
+                            # Preferred active discovery:
+                            # Jarvis announces and flicks one available
+                            # dimmer at a time, then asks the person to
+                            # visually confirm it.
+                            if is_active_light_discovery_request(
+                                request_text
+                            ):
+                                candidates = get_active_light_candidates()
+
+                                if not candidates:
+                                    answer = (
+                                        "I couldn't find any available "
+                                        "dimmers to test."
+                                    )
+                                    print(f"Assistant: {answer}")
+                                    speak_home_assistant(answer)
+
+                                else:
+                                    matched_candidate = None
+
+                                    for candidate in candidates:
+                                        announcement = (
+                                            active_candidate_announcement(
+                                                candidate
+                                            )
+                                        )
+
+                                        print(
+                                            f"Assistant: {announcement}"
+                                        )
+                                        speak_home_assistant(
+                                            announcement
+                                        )
+
+                                        flick_light_candidate(
+                                            candidate
+                                        )
+
+                                        question = (
+                                            "Did that light flick?"
+                                        )
+                                        print(
+                                            f"Assistant: {question}"
+                                        )
+                                        speak_home_assistant(question)
+
+                                        confirmation = (
+                                            listen_for_active_discovery_confirmation()
+                                        )
+
+                                        if confirmation is True:
+                                            matched_candidate = candidate
+                                            break
+
+                                        if confirmation is None:
+                                            retry = (
+                                                "I didn't understand. "
+                                                "Please say yes or no."
+                                            )
+                                            print(
+                                                f"Assistant: {retry}"
+                                            )
+                                            speak_home_assistant(retry)
+
+                                            confirmation = (
+                                                listen_for_active_discovery_confirmation()
+                                            )
+
+                                            if confirmation is True:
+                                                matched_candidate = candidate
+                                                break
+
+                                            if confirmation is None:
+                                                answer = (
+                                                    "I still couldn't "
+                                                    "understand, so I'm "
+                                                    "stopping the light test."
+                                                )
+                                                print(
+                                                    f"Assistant: {answer}"
+                                                )
+                                                speak_home_assistant(
+                                                    answer
+                                                )
+                                                break
+
+                                    if matched_candidate is not None:
+                                        registered_name = (
+                                            matched_candidate.get(
+                                                "registered_name"
+                                            )
+                                        )
+
+                                        if registered_name:
+                                            answer = (
+                                                "Got it. That's the "
+                                                f"{registered_name}."
+                                            )
+
+                                            if matched_candidate.get(
+                                                "device_key"
+                                            ):
+                                                current_request.device_key = (
+                                                    matched_candidate[
+                                                        "device_key"
+                                                    ]
+                                                )
+                                        else:
+                                            answer = (
+                                                "Got it. That's "
+                                                f"{matched_candidate['ha_name']}. "
+                                                "I don't have a room name "
+                                                "for it yet."
+                                            )
+
+                                        print(
+                                            f"Assistant: {answer}"
+                                        )
+                                        speak_home_assistant(answer)
+
+                                    elif 'answer' not in locals():
+                                        answer = (
+                                            "I finished testing the "
+                                            "available dimmers."
+                                        )
+                                        print(
+                                            f"Assistant: {answer}"
+                                        )
+                                        speak_home_assistant(answer)
+
+                                # Active discovery already handled the
+                                # complete interaction.
+                                timing_answer_start = None
+                                timing_answer_done = None
+
+                            # Original physical light discovery remains
+                            # available as a fallback. The person operates
+                            # the physical switch while Jarvis watches HA.
+                            elif is_physical_light_discovery_request(
                                 request_text
                             ):
                                 discovery_prompt = "Flick the switch."
