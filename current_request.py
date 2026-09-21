@@ -13,6 +13,7 @@ class CurrentRequest:
     location: Optional[str] = None
     date: Optional[str] = None
     destination: Optional[str] = None
+    device_key: Optional[str] = None
 
     def clear(self):
         self.domain = None
@@ -20,6 +21,7 @@ class CurrentRequest:
         self.location = None
         self.date = None
         self.destination = None
+        self.device_key = None
 
     def snapshot(self):
         return {
@@ -28,6 +30,7 @@ class CurrentRequest:
             "location": self.location,
             "date": self.date,
             "destination": self.destination,
+            "device_key": self.device_key,
         }
 
     def canonical_text(self):
