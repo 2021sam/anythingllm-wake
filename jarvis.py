@@ -15,8 +15,20 @@ from request_router import answer_question
 from conversation_service import CASUAL, ROOM_QUESTION, classify_utterance
 from utterance_extractor import extract_request
 from homeassistant_tts import speak_home_assistant
+from light_discovery_conversation import (
+    ACTIVE,
+    PHYSICAL,
+    parse_discovery_confirmation,
+    parse_discovery_option,
+    wants_light_control_explanation,
+)
 from device_discovery import (
+    active_candidate_announcement,
+    flick_light_candidate,
+    get_active_light_candidates,
+    is_active_light_discovery_request,
     is_physical_light_discovery_request,
+    parse_active_discovery_confirmation,
     watch_for_light_change,
 )
 
@@ -309,6 +321,303 @@ def record_question(start_threshold=None):
         )
 
     return True
+
+
+def listen_for_light_discovery_response():
+    """
+    Listen for a short response inside the light-discovery conversation.
+
+    This bypasses the generic conversation classifier so replies such as
+    "the first one", "yes", and "go ahead" retain their conversational
+    meaning.
+    """
+    global SPEECH_START_TIMEOUT_SECONDS
+
+    previous_timeout = SPEECH_START_TIMEOUT_SECONDS
+    SPEECH_START_TIMEOUT_SECONDS = CONVERSATION_TIMEOUT_SECONDS
+
+    try:
+        got_response = record_question(start_threshold=0.025)
+    finally:
+        SPEECH_START_TIMEOUT_SECONDS = previous_timeout
+
+    if not got_response:
+        return ""
+
+    print("Transcribing light discovery response...")
+
+    segments, info = whisper_model.transcribe(
+        WAV_FILE,
+        language="en",
+    )
+
+    response_text = " ".join(
+        segment.text.strip()
+        for segment in segments
+    ).strip()
+
+    print(
+        "[LIGHT DISCOVERY CONVERSATION] "
+        f"Human response: {response_text!r}"
+    )
+
+    return response_text
+
+
+def run_active_light_discovery():
+    """
+    Cycle through available smart dimmers one at a time.
+
+    Each candidate is announced before operation and restored to its
+    original state after the brief identification flick.
+    """
+    candidates = get_active_light_candidates()
+
+    if not candidates:
+        answer = "I couldn't find any available dimmers to test."
+        print(f"Assistant: {answer}")
+        speak_home_assistant(answer)
+        return
+
+    matched_candidate = None
+    stopped_for_unclear_response = False
+
+    for candidate in candidates:
+        announcement = active_candidate_announcement(candidate)
+
+        print(f"Assistant: {announcement}")
+        speak_home_assistant(announcement)
+
+        flick_light_candidate(candidate)
+
+        question = "Did that light flick?"
+        print(f"Assistant: {question}")
+        speak_home_assistant(question)
+
+        confirmation = listen_for_active_discovery_confirmation()
+
+        if confirmation is True:
+            matched_candidate = candidate
+            break
+
+        if confirmation is None:
+            retry = "I didn't understand. Please say yes or no."
+            print(f"Assistant: {retry}")
+            speak_home_assistant(retry)
+
+            confirmation = listen_for_active_discovery_confirmation()
+
+            if confirmation is True:
+                matched_candidate = candidate
+                break
+
+            if confirmation is None:
+                answer = (
+                    "I still couldn't understand, so I'm "
+                    "stopping the light test."
+                )
+                print(f"Assistant: {answer}")
+                speak_home_assistant(answer)
+                stopped_for_unclear_response = True
+                break
+
+    if matched_candidate is not None:
+        registered_name = matched_candidate.get("registered_name")
+
+        if registered_name:
+            answer = f"Got it. That's the {registered_name}."
+
+            if matched_candidate.get("device_key"):
+                current_request.device_key = (
+                    matched_candidate["device_key"]
+                )
+        else:
+            answer = (
+                "Got it. That's "
+                f"{matched_candidate['ha_name']}. "
+                "I don't have a room name for it yet."
+            )
+
+        print(f"Assistant: {answer}")
+        speak_home_assistant(answer)
+        return
+
+    if not stopped_for_unclear_response:
+        answer = "I finished testing the available dimmers."
+        print(f"Assistant: {answer}")
+        speak_home_assistant(answer)
+
+
+def run_physical_light_discovery():
+    """
+    Watch Home Assistant while the person physically operates a switch.
+    """
+    discovery_prompt = "Flick the switch."
+
+    print(f"Assistant: {discovery_prompt}")
+    speak_home_assistant(discovery_prompt)
+
+    change = watch_for_light_change()
+
+    if change is None:
+        answer = (
+            "I didn't detect that switch. "
+            "Is the light on now?"
+        )
+
+    elif change.get("multiple"):
+        answer = (
+            "I detected more than one light changing. "
+            "Flick the same switch again."
+        )
+
+    elif change.get("friendly_name"):
+        friendly_name = change["friendly_name"]
+        answer = f"That's the {friendly_name}."
+
+        if change.get("device_key"):
+            current_request.device_key = change["device_key"]
+
+    else:
+        answer = (
+            "I detected "
+            f"{change['entity_id']}, "
+            "but I don't have a room name for it yet."
+        )
+
+    print(f"Assistant: {answer}")
+    speak_home_assistant(answer)
+
+
+def choose_light_discovery_method():
+    """
+    Explain the two light-discovery methods and let the person choose.
+
+    Returns:
+        ACTIVE   - Jarvis cycles through available smart dimmers
+        PHYSICAL - person operates a physical switch while Jarvis watches HA
+        None     - cancelled, timed out, or unclear
+    """
+    explanation = (
+        "We have two options. "
+        "First, I can test the smart dimmers one at a time, "
+        "and you tell me which light flicked. "
+        "Second, you can physically flip a light switch, "
+        "and I'll watch Home Assistant to identify it. "
+        "Which would you like?"
+    )
+
+    print(f"Assistant: {explanation}")
+    speak_home_assistant(explanation)
+
+    response = listen_for_light_discovery_response()
+
+    if not response:
+        message = (
+            "I didn't hear a choice, so I won't change anything."
+        )
+        print(f"Assistant: {message}")
+        speak_home_assistant(message)
+        return None
+
+    choice = parse_discovery_option(response)
+
+    if choice is None:
+        message = (
+            "I didn't understand which option you wanted. "
+            "You can say first option or second option."
+        )
+        print(f"Assistant: {message}")
+        speak_home_assistant(message)
+        return None
+
+    if choice == ACTIVE:
+        confirmation_prompt = (
+            "Okay. You want me to cycle through the smart dimmers "
+            "one at a time so we can identify them. "
+            "Should I start?"
+        )
+    else:
+        confirmation_prompt = (
+            "Okay. You want to flip a physical light switch "
+            "while I watch Home Assistant for the change. "
+            "Should I start watching?"
+        )
+
+    print(f"Assistant: {confirmation_prompt}")
+    speak_home_assistant(confirmation_prompt)
+
+    response = listen_for_light_discovery_response()
+
+    if not response:
+        message = (
+            "I didn't hear a confirmation, so I won't change anything."
+        )
+        print(f"Assistant: {message}")
+        speak_home_assistant(message)
+        return None
+
+    confirmed = parse_discovery_confirmation(response)
+
+    if confirmed is True:
+        return choice
+
+    if confirmed is False:
+        message = "Okay. I won't start the light test."
+        print(f"Assistant: {message}")
+        speak_home_assistant(message)
+        return None
+
+    message = (
+        "I wasn't sure whether you wanted me to start, "
+        "so I won't change anything."
+    )
+    print(f"Assistant: {message}")
+    speak_home_assistant(message)
+
+    return None
+
+
+def listen_for_active_discovery_confirmation():
+    """
+    Listen for a short yes/no response during active light discovery.
+
+    Returns:
+        True  - person saw the tested light flick
+        False - person did not see it
+        None  - no speech or unclear response
+    """
+    global SPEECH_START_TIMEOUT_SECONDS
+
+    previous_timeout = SPEECH_START_TIMEOUT_SECONDS
+    SPEECH_START_TIMEOUT_SECONDS = CONVERSATION_TIMEOUT_SECONDS
+
+    try:
+        got_response = record_question(start_threshold=0.025)
+    finally:
+        SPEECH_START_TIMEOUT_SECONDS = previous_timeout
+
+    if not got_response:
+        return None
+
+    print("Transcribing discovery response...")
+
+    segments, info = whisper_model.transcribe(
+        WAV_FILE,
+        language="en",
+    )
+
+    response_text = " ".join(
+        segment.text.strip()
+        for segment in segments
+    ).strip()
+
+    print(
+        f"[ACTIVE DISCOVERY] Human response: "
+        f"{response_text!r}"
+    )
+
+    return parse_active_discovery_confirmation(response_text)
 
 
 def normalize_command(text):
@@ -1012,68 +1321,45 @@ while not shutdown_requested:
                                     f"{text[len(request_text):].strip()}"
                                 )
 
-                            # Physical light discovery is interactive:
-                            # speak first, then watch Home Assistant while
-                            # the person operates the physical switch.
-                            if is_physical_light_discovery_request(
+                            # A general question about controlling or
+                            # identifying lights starts a conversational
+                            # choice. No device is operated until the person
+                            # selects a method and confirms it.
+                            if wants_light_control_explanation(
                                 request_text
                             ):
-                                discovery_prompt = "Flick the switch."
-
-                                print(
-                                    f"Assistant: {discovery_prompt}"
-                                )
-                                speak_home_assistant(
-                                    discovery_prompt
+                                discovery_method = (
+                                    choose_light_discovery_method()
                                 )
 
-                                change = watch_for_light_change()
+                                if discovery_method == ACTIVE:
+                                    run_active_light_discovery()
 
-                                if change is None:
-                                    answer = (
-                                        "I didn't detect that switch. "
-                                        "Is the light on now?"
-                                    )
+                                elif discovery_method == PHYSICAL:
+                                    run_physical_light_discovery()
 
-                                elif change.get("multiple"):
-                                    answer = (
-                                        "I detected more than one "
-                                        "light changing. Flick the same "
-                                        "switch again."
-                                    )
+                                timing_answer_start = None
+                                timing_answer_done = None
 
-                                elif change.get("friendly_name"):
-                                    friendly_name = change[
-                                        "friendly_name"
-                                    ]
+                            # An explicit active-discovery request is already
+                            # a direct instruction, so run the tested active
+                            # discovery flow without asking the same question
+                            # twice.
+                            elif is_active_light_discovery_request(
+                                request_text
+                            ):
+                                run_active_light_discovery()
 
-                                    answer = (
-                                        f"That's the "
-                                        f"{friendly_name}."
-                                    )
+                                timing_answer_start = None
+                                timing_answer_done = None
 
-                                    # Preserve conversational device
-                                    # context for any registered device.
-                                    if change.get("device_key"):
-                                        current_request.device_key = (
-                                            change["device_key"]
-                                        )
+                            # Preserve the original physical-switch discovery
+                            # behavior for explicit physical requests.
+                            elif is_physical_light_discovery_request(
+                                request_text
+                            ):
+                                run_physical_light_discovery()
 
-                                else:
-                                    answer = (
-                                        "I detected "
-                                        f"{change['entity_id']}, "
-                                        "but I don't have a room name "
-                                        "for it yet."
-                                    )
-
-                                print(f"Assistant: {answer}")
-                                speak_home_assistant(answer)
-
-                                # Discovery already produced and spoke
-                                # the complete answer. Continue directly
-                                # into conversation mode rather than
-                                # calling AnythingLLM.
                                 timing_answer_start = None
                                 timing_answer_done = None
 
