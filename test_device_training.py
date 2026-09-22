@@ -97,33 +97,33 @@ with tempfile.TemporaryDirectory() as temp_dir:
     ):
         assert device_training.answer_training_mode_command(
             "Turn on Training Mode."
-        ) == "Training Mode is normal."
+        ) == "Training Mode is on with medium verbosity."
 
         assert device_training.get_training_mode() == "normal"
 
         assert device_training.answer_training_mode_command(
             "Switch to short Training Mode."
-        ) == "Training Mode is short."
+        ) == "Training Mode is on with low verbosity."
 
         assert device_training.get_training_mode() == "short"
 
         assert device_training.answer_training_mode_command(
             "Make the training mode longer."
-        ) == "Training Mode is long."
+        ) == "Training Mode is on with high verbosity."
 
         assert device_training.get_training_mode() == "long"
 
         assert device_training.answer_training_mode_command(
             "Switch to normal Training Mode."
-        ) == "Training Mode is normal."
+        ) == "Training Mode is on with medium verbosity."
 
         assert device_training.answer_training_mode_command(
             "What Training Mode am I using?"
-        ) == "Training Mode is normal."
+        ) == "Training Mode is on with medium verbosity."
 
         assert device_training.answer_training_mode_command(
             "Is Training Mode enabled?"
-        ) == "Training Mode is enabled."
+        ) == "Training Mode is on with medium verbosity."
 
         assert device_training.answer_training_mode_command(
             "Turn off Training Mode."
@@ -133,7 +133,7 @@ with tempfile.TemporaryDirectory() as temp_dir:
 
         assert device_training.answer_training_mode_command(
             "Start learning mode."
-        ) == "Training Mode is normal."
+        ) == "Training Mode is on with medium verbosity."
 
         assert device_training.answer_training_mode_command(
             "Stop giving me light hints."

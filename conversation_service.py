@@ -32,6 +32,12 @@ DIRECT_FOLLOWUP_PREFIXES = (
     "what about ",
     "how about ",
     "and ",
+    "make it ",
+    "change it ",
+    "actually ",
+    "instead ",
+    "i changed my mind",
+    "i change my mind",
 )
 
 DIRECT_REQUEST_PREFIXES = (

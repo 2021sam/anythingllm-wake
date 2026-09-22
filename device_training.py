@@ -32,6 +32,22 @@ TRAINING_MODES = {
 
 DEFAULT_TRAINING_MODE = "off"
 
+TRAINING_VERBOSITY_NAMES = {
+    "short": "low",
+    "normal": "medium",
+    "long": "high",
+}
+
+
+def describe_training_mode(mode: str) -> str:
+    """Return the user-facing Training Mode status."""
+    if mode == "off":
+        return "Training Mode is off."
+
+    verbosity = TRAINING_VERBOSITY_NAMES.get(mode, "medium")
+    return f"Training Mode is on with {verbosity} verbosity."
+
+
 
 def get_training_mode() -> str:
     """
@@ -168,9 +184,9 @@ def answer_training_mode_command(message: str) -> str | None:
             r"|\b(?:is|are)\b.*\b(?:training|learning|hint)\s+mode\b.*\b(?:enabled|on|active)\b",
             text,
         ):
-            return "Training Mode is enabled."
+            return describe_training_mode(current)
 
-        return f"Training Mode is {current}."
+        return describe_training_mode(current)
 
     off_patterns = [
         r"\bturn\s+off\b",
@@ -202,16 +218,16 @@ def answer_training_mode_command(message: str) -> str | None:
 
     if requested_level is not None:
         set_training_mode(requested_level)
-        return f"Training Mode is {requested_level}."
+        return describe_training_mode(requested_level)
 
     if any(re.search(pattern, text) for pattern in on_patterns):
         set_training_mode("normal")
-        return "Training Mode is normal."
+        return describe_training_mode("normal")
 
     if current == "off":
         return "Training Mode is off."
 
-    return f"Training Mode is {current}."
+    return describe_training_mode(current)
 
 
 

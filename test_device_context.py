@@ -93,3 +93,27 @@ with patch(
     assert FakeHomeAssistantClient.calls == []
 
 print("ALL BARE DEVICE CONTEXT TESTS PASSED")
+
+from conversation_service import DIRECT, classify_utterance
+
+assert classify_utterance(
+    "I changed my mind, make it 5%.",
+    active_conversation=True,
+) == DIRECT
+
+assert classify_utterance(
+    "I change my mind, make it 5%.",
+    active_conversation=True,
+) == DIRECT
+
+assert classify_utterance(
+    "Make it 20%.",
+    active_conversation=True,
+) == DIRECT
+
+assert classify_utterance(
+    "Actually, make it 50%.",
+    active_conversation=True,
+) == DIRECT
+
+print("ALL NATURAL DEVICE FOLLOW-UP CLASSIFIER TESTS PASSED")

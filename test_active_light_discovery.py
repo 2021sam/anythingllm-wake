@@ -89,6 +89,14 @@ assert fake.calls == [
         "turn_on",
         {
             "entity_id": "light.wall_dimmer_1",
+            "brightness": 255,
+        },
+    ),
+    (
+        "light",
+        "turn_on",
+        {
+            "entity_id": "light.wall_dimmer_1",
             "brightness": 25,
         },
     ),
@@ -97,7 +105,14 @@ assert fake.calls == [
 fake.calls.clear()
 flick_light_candidate(front_left, fake, pause_seconds=0)
 assert fake.calls == [
-    ("on", "light.wall_dimmer_2"),
+    (
+        "light",
+        "turn_on",
+        {
+            "entity_id": "light.wall_dimmer_2",
+            "brightness": 255,
+        },
+    ),
     ("off", "light.wall_dimmer_2"),
 ]
 
