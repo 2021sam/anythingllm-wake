@@ -118,6 +118,12 @@ def classify_utterance(text, active_conversation=True):
         if normalized.startswith(QUESTION_STARTERS):
             return DIRECT
 
+        # Once the user has explicitly started a Jarvis conversation,
+        # do not require every natural follow-up to match a whitelist.
+        # Let the normal request router interpret it. Device safety is
+        # enforced later by the device/action layer.
+        return DIRECT
+
     else:
         if normalized.startswith(QUESTION_STARTERS):
             return ROOM_QUESTION

@@ -10,12 +10,12 @@ TESTS = [
     (
         "Oh yeah, it is pretty hot.",
         True,
-        CASUAL,
+        DIRECT,
     ),
     (
         "That's pretty hot.",
         True,
-        CASUAL,
+        DIRECT,
     ),
     (
         "What about tomorrow?",
@@ -92,3 +92,26 @@ print(f"{len(TESTS) - failed}/{len(TESTS)} tests passed.")
 
 if failed:
     raise SystemExit(1)
+
+assert classify_utterance(
+    "We'll calculate it.",
+    active_conversation=True,
+) == DIRECT
+
+assert classify_utterance(
+    "The first option.",
+    active_conversation=True,
+) == DIRECT
+
+assert classify_utterance(
+    "Set the Family Room lights to 5%.",
+    active_conversation=True,
+) == DIRECT
+
+# Room-addressed questions still retain their special classification.
+assert classify_utterance(
+    "Does anyone know how hot it is outside?",
+    active_conversation=True,
+) == ROOM_QUESTION
+
+print("ACTIVE CONVERSATION PERMISSIVE ROUTING TESTS PASSED")

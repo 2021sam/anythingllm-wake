@@ -228,3 +228,18 @@ assert answer_light_how_to(
 print("ALL GENERAL HOW + LIGHT NAVIGATION REGRESSIONS PASSED")
 
 print("ALL SPECIFIC LIGHT HOW-TO TESTS PASSED")
+
+assert parse_discovery_option("First.") == ACTIVE
+assert parse_discovery_option("The first.") == ACTIVE
+assert parse_discovery_option("First option.") == ACTIVE
+assert parse_discovery_option("The first option.") == ACTIVE
+
+assert parse_discovery_option("Second.") == PHYSICAL
+assert parse_discovery_option("The second.") == PHYSICAL
+assert parse_discovery_option("Second option.") == PHYSICAL
+
+assert parse_discovery_option("Third.") == TRAINING
+assert parse_discovery_option("The third.") == TRAINING
+assert parse_discovery_option("Third option.") == TRAINING
+
+print("ALL NATURAL LIGHT MENU CHOICE TESTS PASSED")

@@ -977,6 +977,107 @@ def handle_parameter_command(text, settings):
     return True
 
 
+def run_chill_mode(chill_seconds):
+    """Run Jarvis chill mode. Return after timeout or an explicit wake-up."""
+    duration_text = format_chill_duration(chill_seconds)
+
+    print(
+        f"Chill command received. "
+        f"Sleeping for {duration_text}."
+    )
+
+    speak_home_assistant(
+        f"Okay. I'll chill for {duration_text}."
+    )
+
+    chill_until = time.monotonic() + chill_seconds
+
+    wake_model.reset()
+    vad.reset_states()
+
+    with sd.InputStream(
+        samplerate=SAMPLE_RATE,
+        channels=1,
+        dtype="int16",
+        blocksize=WAKE_CHUNK,
+        device=DEVICE,
+    ) as chill_stream:
+
+        while time.monotonic() < chill_until:
+            audio, overflowed = chill_stream.read(WAKE_CHUNK)
+            audio = np.squeeze(audio)
+            scores = wake_model.predict(audio)
+            woke_early = False
+
+            for name, score in scores.items():
+                if score < WAKE_THRESHOLD:
+                    continue
+
+                print("\nWake word detected during chill mode.")
+                chill_stream.stop()
+
+                # Stay silent here so Jarvis does not hear its own TTS.
+                wake_model.reset()
+                vad.reset_states()
+                time.sleep(0.15)
+
+                if record_question():
+                    print("Transcribing...")
+
+                    segments, info = whisper_model.transcribe(
+                        WAV_FILE,
+                        language="en",
+                    )
+
+                    wake_text = " ".join(
+                        segment.text.strip()
+                        for segment in segments
+                    ).strip()
+
+                    print(f"You said: {wake_text}")
+
+                    wake_command_text = normalize_command(wake_text)
+
+                    for prefix in (
+                        "yes ",
+                        "jarvis ",
+                        "hey jarvis ",
+                    ):
+                        if wake_command_text.startswith(prefix):
+                            wake_command_text = wake_command_text[
+                                len(prefix):
+                            ]
+
+                    if wake_command_text in {
+                        "wake up",
+                        "wake",
+                        "come back",
+                        "im back",
+                        "i am back",
+                    }:
+                        print("Chill mode cancelled early.")
+                        speak_home_assistant("I'm back.")
+                        woke_early = True
+
+                break
+
+            if woke_early:
+                break
+
+            if not chill_stream.active:
+                wake_model.reset()
+                vad.reset_states()
+                chill_stream.start()
+
+    print(
+        "Chill period complete. "
+        "Returning to wake-word mode."
+    )
+
+    wake_model.reset()
+    vad.reset_states()
+
+
 def find_input_device():
     devices = sd.query_devices()
 
@@ -1245,141 +1346,7 @@ while not shutdown_requested:
                         chill_seconds = parse_chill_seconds(text)
 
                         if chill_seconds is not None:
-                            duration_text = format_chill_duration(
-                                chill_seconds
-                            )
-
-                            print(
-                                f"Chill command received. "
-                                f"Sleeping for {duration_text}."
-                            )
-
-                            speak_home_assistant(
-                                f"Okay. I'll chill for {duration_text}."
-                            )
-
-                            chill_until = (
-                                time.monotonic() + chill_seconds
-                            )
-
-                            wake_model.reset()
-                            vad.reset_states()
-
-                            with sd.InputStream(
-                                samplerate=SAMPLE_RATE,
-                                channels=1,
-                                dtype="int16",
-                                blocksize=WAKE_CHUNK,
-                                device=DEVICE,
-                            ) as chill_stream:
-
-                                while time.monotonic() < chill_until:
-                                    audio, overflowed = chill_stream.read(
-                                        WAKE_CHUNK
-                                    )
-
-                                    audio = np.squeeze(audio)
-
-                                    scores = wake_model.predict(audio)
-
-                                    woke_early = False
-
-                                    for name, score in scores.items():
-                                        if score >= WAKE_THRESHOLD:
-                                            print(
-                                                "\nWake word detected "
-                                                "during chill mode."
-                                            )
-
-                                            chill_stream.stop()
-
-                                            # Stay silent during chill mode.
-                                            # Speaking "Yes" here can be picked
-                                            # up by our own microphone.
-                                            wake_model.reset()
-                                            vad.reset_states()
-                                            time.sleep(0.15)
-
-                                            if record_question():
-                                                print("Transcribing...")
-
-                                                segments, info = (
-                                                    whisper_model.transcribe(
-                                                        WAV_FILE,
-                                                        language="en",
-                                                    )
-                                                )
-
-                                                wake_text = " ".join(
-                                                    segment.text.strip()
-                                                    for segment in segments
-                                                ).strip()
-
-                                                print(
-                                                    f"You said: {wake_text}"
-                                                )
-
-                                                normalized_wake_text = (
-                                                    normalize_command(
-                                                        wake_text
-                                                    )
-                                                )
-
-                                                wake_commands = {
-                                                    "wake up",
-                                                    "wake",
-                                                    "come back",
-                                                    "im back",
-                                                    "i am back",
-                                                }
-
-                                                wake_command_text = (
-                                                    normalized_wake_text
-                                                )
-
-                                                for prefix in (
-                                                    "yes ",
-                                                    "jarvis ",
-                                                    "hey jarvis ",
-                                                ):
-                                                    if wake_command_text.startswith(
-                                                        prefix
-                                                    ):
-                                                        wake_command_text = (
-                                                            wake_command_text[
-                                                                len(prefix):
-                                                            ]
-                                                        )
-
-                                                if wake_command_text in wake_commands:
-                                                    print(
-                                                        "Chill mode "
-                                                        "cancelled early."
-                                                    )
-
-                                                    speak_home_assistant(
-                                                        "I'm back."
-                                                    )
-
-                                                    woke_early = True
-
-                                            break
-
-                                    if woke_early:
-                                        break
-
-                                    if not chill_stream.active:
-                                        wake_model.reset()
-                                        vad.reset_states()
-                                        chill_stream.start()
-
-                            print(
-                                "Chill period complete. "
-                                "Returning to wake-word mode."
-                            )
-
-                            wake_model.reset()
-                            vad.reset_states()
+                            run_chill_mode(chill_seconds)
                             reconnect_requested = True
                             break
 
@@ -1525,6 +1492,18 @@ while not shutdown_requested:
 
                                 if not followup_text:
                                     continue
+
+                                # Deterministic commands must be handled
+                                # before conversational routing so they do not
+                                # fall through to AnythingLLM.
+                                chill_seconds = parse_chill_seconds(
+                                    followup_text
+                                )
+
+                                if chill_seconds is not None:
+                                    run_chill_mode(chill_seconds)
+                                    reconnect_requested = True
+                                    break
 
                                 # Specific named-room HOW-to questions teach
                                 # the command without operating the light.

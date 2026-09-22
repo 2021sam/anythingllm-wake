@@ -109,7 +109,7 @@ def parse_discovery_option(message: str) -> str | None:
     text = _normalize(message)
 
     active_patterns = (
-        r"\b(?:the )?first (?:one|option)\b",
+        r"\b(?:the )?first\b",
         r"\b(?:option|action) (?:one|1)\b",
         r"\bcycle through\b",
         r"\btest (?:the )?(?:lights?|dimmers?)\b",
@@ -118,7 +118,7 @@ def parse_discovery_option(message: str) -> str | None:
     )
 
     physical_patterns = (
-        r"\b(?:the )?second (?:one|option)\b",
+        r"\b(?:the )?second\b",
         r"\boption (?:two|2)\b",
         r"\bphysical switch\b",
         r"\bi(?:'| )?ll flip (?:the )?switch\b",
@@ -126,7 +126,7 @@ def parse_discovery_option(message: str) -> str | None:
     )
 
     training_patterns = (
-        r"\b(?:the )?third (?:one|option)\b",
+        r"\b(?:the )?third\b",
         r"\boption (?:three|3)\b",
         r"\btraining mode\b",
         r"\btraining\b",
