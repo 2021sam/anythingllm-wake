@@ -1,7 +1,5 @@
 import re
 
-from conversation_service import DIRECT, classify_utterance
-
 
 _SENTENCE_RE = re.compile(
     r"""
@@ -30,17 +28,23 @@ def split_sentences(text):
     return sentences
 
 
+def _normalized_sentence(sentence):
+    """Normalize a sentence for conservative repetition detection."""
+    return re.sub(
+        r"[^a-z0-9]+",
+        " ",
+        sentence.lower(),
+    ).strip()
+
+
 def extract_request(text):
     """
-    Extract the first coherent request block from a transcript.
+    Preserve natural multi-sentence speech by default.
 
-    Commentary immediately before the first actionable sentence is
-    preserved as context. Speech after that first actionable sentence
-    is excluded for now so unrelated room speech or mimicry does not
-    contaminate the request.
-
-    If no actionable sentence can be identified, preserve the original
-    transcript rather than risk deleting meaningful speech.
+    Only trim trailing speech when there is strong evidence that Whisper
+    captured repeated trailing mimicry/noise. This deliberately does not
+    use the active-conversation classifier because active conversation is
+    permissive: ordinary understandable speech is allowed through.
     """
     text = text.strip()
 
@@ -49,22 +53,39 @@ def extract_request(text):
 
     sentences = split_sentences(text)
 
-    if not sentences:
+    if len(sentences) < 3:
         return text
 
-    request_index = None
+    # Conservative known-noise case:
+    #
+    #   What is two plus two?
+    #   Two plus nothing.
+    #   Two plus nothing.
+    #
+    # If the same nonempty trailing sentence is repeated consecutively,
+    # preserve everything before that repeated tail.
+    normalized = [
+        _normalized_sentence(sentence)
+        for sentence in sentences
+    ]
 
-    for index, sentence in enumerate(sentences):
-        kind = classify_utterance(
-            sentence,
-            active_conversation=True,
-        )
+    tail = normalized[-1]
 
-        if kind == DIRECT:
-            request_index = index
-            break
+    if (
+        tail
+        and normalized[-2] == tail
+    ):
+        first_tail_index = len(sentences) - 2
 
-    if request_index is None:
-        return text
+        while (
+            first_tail_index > 0
+            and normalized[first_tail_index - 1] == tail
+        ):
+            first_tail_index -= 1
 
-    return " ".join(sentences[: request_index + 1]).strip()
+        preserved = sentences[:first_tail_index]
+
+        if preserved:
+            return " ".join(preserved).strip()
+
+    return text

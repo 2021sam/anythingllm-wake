@@ -83,13 +83,14 @@ for text in (
     )
 
 
-# Ordinary background conversation should still be ignored.
+# Once Jarvis is in an explicit active conversation, ordinary
+# understandable speech is allowed through to the normal router.
 assert (
     classify_utterance(
         "I really like this game.",
         active_conversation=True,
     )
-    == CASUAL
+    == DIRECT
 )
 
 print("ALL DEVICE BRIGHTNESS TESTS PASSED")
