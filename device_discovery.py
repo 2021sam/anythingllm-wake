@@ -1,6 +1,7 @@
 import re
 import time
 
+from device_action_tracker import expect_device_change
 from device_registry import (
     DEVICES,
     get_device_key_by_entity_id,
@@ -211,26 +212,52 @@ def flick_light_candidate(
     pause_seconds: float = 0.7,
 ) -> None:
     """
-    Briefly change one light and restore its original state.
+    Visibly identify one light, then restore its original state.
 
-    This is deliberately separate from physical-switch discovery.
+    Discovery uses full brightness temporarily so even a dimmer whose
+    remembered brightness is extremely low can be identified visually.
+    Normal Jarvis light-control behavior is not changed.
     """
     if client is None:
         client = HomeAssistantClient()
 
     entity_id = candidate["entity_id"]
     original_state = candidate["state"]
+    original_brightness = candidate.get(
+        "attributes",
+        {},
+    ).get("brightness")
+
+    discovery_brightness = 255
 
     if original_state == "on":
-        original_brightness = candidate.get(
-            "attributes",
-            {},
-        ).get("brightness")
-
+        # Make an already-on light visibly change:
+        # OFF -> full brightness -> original brightness.
+        expect_device_change(entity_id, "off")
         client.turn_off(entity_id)
         time.sleep(pause_seconds)
 
+        expect_device_change(
+            entity_id,
+            "on",
+            brightness=discovery_brightness,
+        )
+        client.call_service(
+            "light",
+            "turn_on",
+            {
+                "entity_id": entity_id,
+                "brightness": discovery_brightness,
+            },
+        )
+        time.sleep(pause_seconds)
+
         if original_brightness is not None:
+            expect_device_change(
+                entity_id,
+                "on",
+                brightness=original_brightness,
+            )
             client.call_service(
                 "light",
                 "turn_on",
@@ -240,19 +267,36 @@ def flick_light_candidate(
                 },
             )
         else:
+            expect_device_change(entity_id, "on")
             client.turn_on(entity_id)
 
     elif original_state == "off":
-        client.turn_on(entity_id)
+        # Make an off light unmistakably visible, then return it to off.
+        expect_device_change(
+            entity_id,
+            "on",
+            brightness=discovery_brightness,
+        )
+        client.call_service(
+            "light",
+            "turn_on",
+            {
+                "entity_id": entity_id,
+                "brightness": discovery_brightness,
+            },
+        )
         time.sleep(pause_seconds)
+
+        expect_device_change(entity_id, "off")
         client.turn_off(entity_id)
+
     else:
         raise ValueError(
             f"Cannot flick {entity_id} from state {original_state!r}"
         )
 
     print(
-        f"[ACTIVE DISCOVERY] Flicked {entity_id} "
+        f"[ACTIVE DISCOVERY] Tested {entity_id} "
         f"and restored state={original_state}"
     )
 

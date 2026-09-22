@@ -1,6 +1,7 @@
 from light_discovery_conversation import (
     ACTIVE,
     PHYSICAL,
+    TRAINING,
     parse_discovery_confirmation,
     parse_discovery_option,
     wants_light_control_explanation,
@@ -106,3 +107,99 @@ for phrase in (
     assert parse_light_state_confirmation(phrase) is None, phrase
 
 print("ALL PHYSICAL LIGHT STATE RESPONSE TESTS PASSED")
+
+# HOW + lighting terminology must enter light navigation.
+for phrase in (
+    "How do I use the lights?",
+    "How do I control the lights?",
+    "How do these lights work?",
+    "Can you show me how the lights work?",
+    "I don't know how to use these lights.",
+    "How do I control the dimmers?",
+    "How do the dimmers work?",
+    "How do I use this light switch?",
+    "How do I control the light switches?",
+):
+    assert wants_light_control_explanation(phrase), phrase
+
+# These must NOT accidentally enter light navigation.
+for phrase in (
+    "Turn on the lights.",
+    "The lights are on.",
+    "How hot is this room?",
+    "How do I control the room?",
+    "How is the weather?",
+):
+    assert not wants_light_control_explanation(phrase), phrase
+
+print("ALL HOW + LIGHT NAVIGATION TESTS PASSED")
+
+# Option 3 = Training Mode teaches light voice commands.
+for phrase in (
+    "third option",
+    "the third one",
+    "option three",
+    "option 3",
+    "training mode",
+    "training",
+    "teach me",
+):
+    assert parse_discovery_option(phrase) == TRAINING, phrase
+
+print("ALL TRAINING NAVIGATION OPTION TESTS PASSED")
+
+
+# Specific HOW-to-operate requests should not open identification navigation.
+assert not wants_light_control_explanation(
+    "How do I turn on the Family Room light?"
+)
+assert not wants_light_control_explanation(
+    "How do I turn off the Family Room lights?"
+)
+assert not wants_light_control_explanation(
+    "How do I dim the Family Room lights?"
+)
+assert not wants_light_control_explanation(
+    "How do I set the Family Room light to 50 percent?"
+)
+
+# Preserve general HOW + lighting navigation.
+assert wants_light_control_explanation(
+    "How do I use the lights?"
+)
+assert wants_light_control_explanation(
+    "How do I control the dimmers?"
+)
+
+# Whisper can occasionally transcribe "Option one" as "Action one".
+assert parse_discovery_option("Action one.") == ACTIVE
+
+print("ALL LIGHT HELP UX TESTS PASSED")
+
+from light_discovery_conversation import answer_light_how_to
+
+assert answer_light_how_to(
+    "How do I turn on the Family Room light?"
+) == "Just say, 'Turn on the Family Room light.'"
+
+assert answer_light_how_to(
+    "How do I turn off the Family Room light?"
+) == "Just say, 'Turn off the Family Room light.'"
+
+assert answer_light_how_to(
+    "How do I set the Family Room light to 50 percent?"
+) == (
+    "You can set the Family Room light to a percentage. "
+    "For example, say, "
+    "'Set the Family Room light to 50 percent.'"
+)
+
+assert answer_light_how_to(
+    "Turn on the Family Room light."
+) is None
+
+assert answer_light_how_to(
+    "How do I use the lights?"
+) is None
+
+print("ALL SPECIFIC LIGHT HOW-TO TESTS PASSED")

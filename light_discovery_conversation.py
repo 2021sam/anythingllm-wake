@@ -3,6 +3,7 @@ import re
 
 ACTIVE = "active"
 PHYSICAL = "physical"
+TRAINING = "training"
 
 
 def _normalize(text: str) -> str:
@@ -13,45 +14,110 @@ def _normalize(text: str) -> str:
 
 def wants_light_control_explanation(message: str) -> bool:
     """
-    Detect a question about how Jarvis can identify/control lights.
+    Detect requests for help identifying or using lights.
 
-    This only requests an explanation of the available methods.
-    It must never operate a light by itself.
+    Preserve the existing navigation requests, while also making
+    HOW + any lighting term a universal entrance to light navigation.
+
+    This only requests navigation/help. It must never operate
+    a light by itself.
     """
     text = _normalize(message)
+    words = set(text.split())
 
-    if not any(
-        word in text
-        for word in (
-            "light",
-            "lights",
-            "dimmer",
-            "dimmers",
-            "switch",
-            "switches",
-        )
-    ):
+    lighting_terms = {
+        "light",
+        "lights",
+        "dimmer",
+        "dimmers",
+        "switch",
+        "switches",
+    }
+
+    # Broad natural-language entrance:
+    # HOW + lighting term opens navigation unless the person is asking
+    # how to perform a specific light action. Specific actions should be
+    # handled by normal device-control/help routing instead.
+    if "how" in words and words & lighting_terms:
+        specific_action_words = {
+            "on",
+            "off",
+            "dim",
+            "brighten",
+            "set",
+        }
+
+        if words & specific_action_words:
+            return False
+
+        return True
+
+    # Preserve the older navigation/capability requests.
+    if not words & lighting_terms:
         return False
 
     patterns = (
-        r"\bhow (?:do|can|would) you control\b",
-        r"\bhow (?:do|can|would) you identify\b",
-        r"\bhow (?:do|can|would) you figure out\b",
         r"\bwhat (?:are|is) (?:my|the) options?\b",
     )
 
     return any(re.search(pattern, text) for pattern in patterns)
 
 
+
+def answer_light_how_to(message: str) -> str | None:
+    """
+    Answer specific HOW-to-operate-light questions without operating
+    the device.
+
+    General questions such as "How do I use the lights?" remain part
+    of the three-option light navigation.
+    """
+    text = _normalize(message)
+
+    if "how" not in text.split():
+        return None
+
+    room = None
+
+    if "family room" in text:
+        room = "Family Room"
+    elif "front left bedroom" in text:
+        room = "Front Left Bedroom"
+
+    if room is None:
+        return None
+
+    if re.search(r"\bturn (?:the )?(?:light |lights )?on\b", text):
+        return f"Just say, 'Turn on the {room} light.'"
+
+    if re.search(r"\bturn on\b", text):
+        return f"Just say, 'Turn on the {room} light.'"
+
+    if re.search(r"\bturn (?:the )?(?:light |lights )?off\b", text):
+        return f"Just say, 'Turn off the {room} light.'"
+
+    if re.search(r"\bturn off\b", text):
+        return f"Just say, 'Turn off the {room} light.'"
+
+    if re.search(r"\b(?:dim|set|brightness|brighten)\b", text):
+        return (
+            f"You can set the {room} light to a percentage. "
+            f"For example, say, "
+            f"'Set the {room} light to 50 percent.'"
+        )
+
+    return None
+
+
 def parse_discovery_option(message: str) -> str | None:
     """
-    Resolve a conversational choice between the two discovery methods.
+    Resolve a conversational choice between the three light-help methods.
     """
     text = _normalize(message)
 
     active_patterns = (
         r"\b(?:the )?first (?:one|option)\b",
-        r"\boption (?:one|1)\b",
+        r"\b(?:option|action) (?:one|1)\b",
         r"\bcycle through\b",
         r"\btest (?:the )?(?:lights?|dimmers?)\b",
         r"\byou do it\b",
@@ -66,11 +132,22 @@ def parse_discovery_option(message: str) -> str | None:
         r"\bi(?:'| )?ll do it\b",
     )
 
+    training_patterns = (
+        r"\b(?:the )?third (?:one|option)\b",
+        r"\boption (?:three|3)\b",
+        r"\btraining mode\b",
+        r"\btraining\b",
+        r"\bteach me\b",
+    )
+
     if any(re.search(pattern, text) for pattern in active_patterns):
         return ACTIVE
 
     if any(re.search(pattern, text) for pattern in physical_patterns):
         return PHYSICAL
+
+    if any(re.search(pattern, text) for pattern in training_patterns):
+        return TRAINING
 
     return None
 

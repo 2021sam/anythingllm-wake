@@ -22,11 +22,18 @@ from physical_light_discovery import (
 from light_discovery_conversation import (
     ACTIVE,
     PHYSICAL,
+    TRAINING,
+    answer_light_how_to,
     parse_discovery_confirmation,
     parse_discovery_option,
     parse_light_state_confirmation,
     wants_light_control_explanation,
 )
+from device_training import (
+    describe_training_mode,
+    set_training_mode,
+)
+
 from device_discovery import (
     active_candidate_announcement,
     flick_light_candidate,
@@ -55,7 +62,7 @@ WAKE_THRESHOLD = 0.5
 # These values came from our microphone/VAD test.
 START_THRESHOLD = 0.008
 CONTINUE_THRESHOLD = 0.006
-SILENCE_SECONDS = 0.8
+SILENCE_SECONDS = 1.4
 MAX_RECORD_SECONDS = 15
 PRE_ROLL_SECONDS = 0.4
 SPEECH_START_TIMEOUT_SECONDS = 30
@@ -387,6 +394,12 @@ def handle_light_discovery_request(message):
         elif discovery_method == PHYSICAL:
             run_physical_light_discovery()
 
+        elif discovery_method == TRAINING:
+            set_training_mode("normal")
+            answer = describe_training_mode("normal")
+            print(f"Assistant: {answer}")
+            speak_home_assistant(answer)
+
         return True
 
     if is_active_light_discovery_request(message):
@@ -461,7 +474,15 @@ def run_active_light_discovery():
         registered_name = matched_candidate.get("registered_name")
 
         if registered_name:
-            answer = f"Got it. That's the {registered_name}."
+            room = registered_name.rsplit(" ", 1)[0]
+            answer = (
+                f"Got it. That's the {registered_name}. "
+                f"To turn it on, just say, "
+                f"'Turn on the {room} lights.' "
+                f"You can also say, "
+                f"'Turn off the {room} lights,' or "
+                f"'Set the {room} lights to 50 percent.'"
+            )
 
             if matched_candidate.get("device_key"):
                 current_request.device_key = (
@@ -533,19 +554,22 @@ def run_physical_light_discovery():
 
 def choose_light_discovery_method():
     """
-    Explain the two light-discovery methods and let the person choose.
+    Explain the three light-help methods and let the person choose.
 
     Returns:
         ACTIVE   - Jarvis cycles through available smart dimmers
         PHYSICAL - person operates a physical switch while Jarvis watches HA
+        TRAINING - Jarvis enables Training Mode with medium verbosity
         None     - cancelled, timed out, or unclear
     """
     explanation = (
-        "We have two options. "
+        "We have three options. "
         "First, I can test the smart dimmers one at a time, "
         "and you tell me which light flicked. "
         "Second, you can physically flip a light switch, "
         "and I'll watch Home Assistant to identify it. "
+        "Third, I can turn on Training Mode with medium verbosity "
+        "and teach you useful voice commands as you use the lights. "
         "Which would you like?"
     )
 
@@ -567,7 +591,7 @@ def choose_light_discovery_method():
     if choice is None:
         message = (
             "I didn't understand which option you wanted. "
-            "You can say first option or second option."
+            "You can say first option, second option, or third option."
         )
         print(f"Assistant: {message}")
         speak_home_assistant(message)
@@ -579,11 +603,19 @@ def choose_light_discovery_method():
             "one at a time so we can identify them. "
             "Should I start?"
         )
-    else:
+
+    elif choice == PHYSICAL:
         confirmation_prompt = (
             "Okay. You want to flip a physical light switch "
             "while I watch Home Assistant for the change. "
             "Should I start watching?"
+        )
+
+    else:
+        confirmation_prompt = (
+            "Okay. You want Training Mode with medium verbosity "
+            "to teach you useful light commands as you use the lights. "
+            "Should I turn it on?"
         )
 
     print(f"Assistant: {confirmation_prompt}")
@@ -605,7 +637,7 @@ def choose_light_discovery_method():
         return choice
 
     if confirmed is False:
-        message = "Okay. I won't start the light test."
+        message = "Okay. I won't start anything."
         print(f"Assistant: {message}")
         speak_home_assistant(message)
         return None
@@ -1363,9 +1395,20 @@ while not shutdown_requested:
                                     f"{text[len(request_text):].strip()}"
                                 )
 
+                            # Specific HOW-to light questions teach the
+                            # command without operating the device.
+                            light_how_to_answer = answer_light_how_to(
+                                request_text
+                            )
+
+                            if light_how_to_answer is not None:
+                                timing_answer_start = time.monotonic()
+                                answer = light_how_to_answer
+                                timing_answer_done = time.monotonic()
+
                             # Use the same deterministic discovery router
                             # for initial requests and conversation follow-ups.
-                            if handle_light_discovery_request(
+                            elif handle_light_discovery_request(
                                 request_text
                             ):
                                 timing_answer_start = None
@@ -1422,7 +1465,7 @@ while not shutdown_requested:
 
                                 try:
                                     got_followup = record_question(
-                                        start_threshold=0.025,
+                                        start_threshold=START_THRESHOLD,
                                     )
                                 finally:
                                     SPEECH_START_TIMEOUT_SECONDS = (

@@ -103,3 +103,39 @@ assert tracker.should_suppress(
 
 
 print("ALL DEVICE ACTION TRACKER TESTS PASSED")
+
+# Multiple Jarvis changes for one entity must remain ordered instead
+# of the second expectation overwriting the first.
+queue_tracker = DeviceActionTracker(
+    suppression_seconds=5.0,
+    clock=lambda: now[0],
+)
+
+queue_tracker.expect(entity_id, "on")
+queue_tracker.expect(entity_id, "off")
+
+assert queue_tracker.should_suppress(
+    entity_id,
+    {
+        "state": "on",
+        "brightness": 191,
+    },
+) is True
+
+assert queue_tracker.should_suppress(
+    entity_id,
+    {
+        "state": "off",
+        "brightness": None,
+    },
+) is True
+
+assert queue_tracker.should_suppress(
+    entity_id,
+    {
+        "state": "on",
+        "brightness": 191,
+    },
+) is False
+
+print("ALL DEVICE ACTION QUEUE TESTS PASSED")

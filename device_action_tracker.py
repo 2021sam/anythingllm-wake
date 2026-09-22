@@ -32,13 +32,17 @@ class DeviceActionTracker:
         brightness: int | None = None,
     ) -> None:
         with self._lock:
-            self._expected[entity_id] = {
+            expectation = {
                 "state": state,
                 "brightness": brightness,
                 "expires_at": (
                     self.clock() + self.suppression_seconds
                 ),
             }
+
+            self._expected.setdefault(entity_id, []).append(
+                expectation
+            )
 
     def clear(self, entity_id: str) -> None:
         with self._lock:
@@ -50,20 +54,29 @@ class DeviceActionTracker:
         state: dict,
     ) -> bool:
         """
-        Return True only when the observed state matches a recent state
+        Return True when the observed state matches a recent state
         that Jarvis explicitly expected to cause.
 
-        Matching consumes the expectation.
+        Expected changes are queued per entity so a short Jarvis
+        sequence such as ON -> OFF cannot overwrite itself before
+        the background monitor observes both changes.
         """
         with self._lock:
-            expected = self._expected.get(entity_id)
+            queue = self._expected.get(entity_id)
 
-            if expected is None:
+            if not queue:
                 return False
 
-            if self.clock() > expected["expires_at"]:
+            now = self.clock()
+
+            while queue and now > queue[0]["expires_at"]:
+                queue.pop(0)
+
+            if not queue:
                 self._expected.pop(entity_id, None)
                 return False
+
+            expected = queue[0]
 
             if state.get("state") != expected["state"]:
                 return False
@@ -76,12 +89,16 @@ class DeviceActionTracker:
                 if actual_brightness is None:
                     return False
 
-                # HA/device rounding may differ slightly from the requested
-                # 0-255 value, so allow a very small hardware rounding delta.
-                if abs(actual_brightness - expected_brightness) > 2:
+                if abs(
+                    actual_brightness - expected_brightness
+                ) > 2:
                     return False
 
-            self._expected.pop(entity_id, None)
+            queue.pop(0)
+
+            if not queue:
+                self._expected.pop(entity_id, None)
+
             return True
 
 
