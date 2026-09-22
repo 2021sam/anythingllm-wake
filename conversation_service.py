@@ -38,6 +38,8 @@ DIRECT_FOLLOWUP_PREFIXES = (
     "instead ",
     "i changed my mind",
     "i change my mind",
+    "never mind",
+    "nevermind",
 )
 
 DIRECT_REQUEST_PREFIXES = (
@@ -92,6 +94,23 @@ def classify_utterance(text, active_conversation=True):
             return DIRECT
 
         if normalized.startswith(DIRECT_REQUEST_PREFIXES):
+            return DIRECT
+
+        # Natural speech can put conversational filler before a clear
+        # command, especially after speech-to-text transcription.
+        # During an active conversation, recognize an embedded imperative
+        # instead of requiring the command to be the first words spoken.
+        embedded_request_patterns = (
+            r"\b(?:just\s+)?turn\s+(?:it|them|the\s+lights?)\s+(?:on|off)\b",
+            r"\b(?:just\s+)?set\s+(?:it|them|the\s+lights?)\s+to\b",
+            r"\b(?:just\s+)?dim\s+(?:it|them|the\s+lights?)\b",
+            r"\b(?:just\s+)?make\s+(?:it|them)\s+(?:brighter|dimmer)\b",
+        )
+
+        if any(
+            re.search(pattern, normalized)
+            for pattern in embedded_request_patterns
+        ):
             return DIRECT
 
         # During an active Jarvis conversation, an ordinary

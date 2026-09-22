@@ -35,21 +35,14 @@ def wants_light_control_explanation(message: str) -> bool:
     }
 
     # Broad natural-language entrance:
-    # HOW + lighting term opens navigation unless the person is asking
-    # how to perform a specific light action. Specific actions should be
-    # handled by normal device-control/help routing instead.
+    # HOW + any lighting term opens the three-option navigation.
+    #
+    # Specific named-room HOW-to questions are intercepted first by
+    # answer_light_how_to(), so a question such as
+    # "How do I turn on the Family Room light?" can teach the command
+    # without preventing general questions such as
+    # "How do you turn on the lights?" from opening navigation.
     if "how" in words and words & lighting_terms:
-        specific_action_words = {
-            "on",
-            "off",
-            "dim",
-            "brighten",
-            "set",
-        }
-
-        if words & specific_action_words:
-            return False
-
         return True
 
     # Preserve the older navigation/capability requests.

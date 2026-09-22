@@ -63,7 +63,7 @@ def answer_question(message, current_request):
         and current_request.device_key
         and any(
             word in normalized.split()
-            for word in ("it", "that", "light", "lights")
+            for word in ("it", "them", "that", "light", "lights")
         )
     )
 

@@ -150,16 +150,19 @@ print("ALL TRAINING NAVIGATION OPTION TESTS PASSED")
 
 
 # Specific HOW-to-operate requests should not open identification navigation.
-assert not wants_light_control_explanation(
+# The broad navigation detector recognizes HOW + lighting terms.
+# Named-room HOW-to requests are intercepted first by
+# answer_light_how_to() in Jarvis routing.
+assert wants_light_control_explanation(
     "How do I turn on the Family Room light?"
 )
-assert not wants_light_control_explanation(
+assert wants_light_control_explanation(
     "How do I turn off the Family Room lights?"
 )
-assert not wants_light_control_explanation(
+assert wants_light_control_explanation(
     "How do I dim the Family Room lights?"
 )
-assert not wants_light_control_explanation(
+assert wants_light_control_explanation(
     "How do I set the Family Room light to 50 percent?"
 )
 
@@ -201,5 +204,27 @@ assert answer_light_how_to(
 assert answer_light_how_to(
     "How do I use the lights?"
 ) is None
+
+# General HOW + light action still opens three-option navigation.
+assert wants_light_control_explanation(
+    "How do you turn on the lights?"
+)
+assert wants_light_control_explanation(
+    "How do I turn off the lights?"
+)
+assert wants_light_control_explanation(
+    "How do I dim the lights?"
+)
+assert wants_light_control_explanation(
+    "How do I set the lights to 50 percent?"
+)
+
+# A named-room HOW-to is handled before navigation by
+# answer_light_how_to().
+assert answer_light_how_to(
+    "How do I turn on the Family Room light?"
+) == "Just say, 'Turn on the Family Room light.'"
+
+print("ALL GENERAL HOW + LIGHT NAVIGATION REGRESSIONS PASSED")
 
 print("ALL SPECIFIC LIGHT HOW-TO TESTS PASSED")
