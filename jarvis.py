@@ -1526,10 +1526,24 @@ while not shutdown_requested:
                                 if not followup_text:
                                     continue
 
-                                # Discovery/capability questions must use the
-                                # same deterministic router as the initial
-                                # wake-word request. Never send these directly
-                                # to AnythingLLM.
+                                # Specific named-room HOW-to questions teach
+                                # the command without operating the light.
+                                light_how_to_answer = answer_light_how_to(
+                                    followup_text
+                                )
+
+                                if light_how_to_answer is not None:
+                                    print(
+                                        f"Assistant: {light_how_to_answer}"
+                                    )
+                                    speak_home_assistant(
+                                        light_how_to_answer
+                                    )
+                                    continue
+
+                                # General discovery/capability questions use
+                                # the same three-option navigation as the
+                                # initial wake-word request.
                                 if handle_light_discovery_request(
                                     followup_text
                                 ):

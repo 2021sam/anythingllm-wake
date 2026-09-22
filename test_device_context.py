@@ -117,3 +117,45 @@ assert classify_utterance(
 ) == DIRECT
 
 print("ALL NATURAL DEVICE FOLLOW-UP CLASSIFIER TESTS PASSED")
+
+# Natural correction phrases during active device conversation.
+assert classify_utterance(
+    "Never mind, set it to 90.",
+    active_conversation=True,
+) == DIRECT
+
+assert classify_utterance(
+    "Nevermind set it to 90.",
+    active_conversation=True,
+) == DIRECT
+
+assert classify_utterance(
+    "Never mind, make it 25%.",
+    active_conversation=True,
+) == DIRECT
+
+print("ALL NEVER-MIND DEVICE FOLLOW-UP TESTS PASSED")
+
+# Conversational filler or imperfect STT before an unmistakable
+# contextual device command must not cause the command to be ignored.
+assert classify_utterance(
+    "Yo, forget about it. Just turn them off.",
+    active_conversation=True,
+) == DIRECT
+
+assert classify_utterance(
+    "You'll forget about it. Just turn them off.",
+    active_conversation=True,
+) == DIRECT
+
+assert classify_utterance(
+    "Okay, whatever. Just turn it off.",
+    active_conversation=True,
+) == DIRECT
+
+assert classify_utterance(
+    "Actually forget that, just set it to 50.",
+    active_conversation=True,
+) == DIRECT
+
+print("ALL EMBEDDED DEVICE FOLLOW-UP TESTS PASSED")
