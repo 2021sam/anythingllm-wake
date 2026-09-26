@@ -72,8 +72,10 @@ SPEECH_START_CONSECUTIVE_CHUNKS = 3
 AUDIO_HEALTH_INTERVAL_SECONDS = 60
 EXPECTED_INPUT_DEVICE = "Arctis 7P+"
 
-# Reopen the microphone if it delivers continuous digital silence.
-ZERO_AUDIO_RECONNECT_SECONDS = 300  # 5 minutes
+# Recover automatically when a USB headset disappears, sleeps, or leaves
+# behind a stale CoreAudio stream that produces effectively no signal.
+DEAD_AUDIO_RMS_THRESHOLD = 0.00001
+DEAD_AUDIO_RECONNECT_SECONDS = 30
 AUDIO_RECONNECT_RETRY_SECONDS = 5
 
 # After Jarvis answers, remain available for natural follow-up
@@ -1116,9 +1118,13 @@ while not shutdown_requested:
             flush=True,
         )
 
-        zero_audio_since = None
+        dead_audio_since = None
         last_audio_health = time.monotonic()
         ignore_audio_until = time.monotonic() + 0.5
+
+        # A newly acquired microphone gets fresh detector state.
+        wake_model.reset()
+        vad.reset_states()
 
         with sd.InputStream(
             samplerate=SAMPLE_RATE,
@@ -1201,17 +1207,24 @@ while not shutdown_requested:
                 if now < ignore_audio_until:
                     continue
 
-                if np.all(audio == 0):
-                    if zero_audio_since is None:
-                        zero_audio_since = now
+                # Detect a stale/dead CoreAudio stream. Some USB headsets
+                # remain "active" after sleeping even though they no longer
+                # deliver meaningful samples.
+                audio_float = audio.astype(np.float32) / 32768.0
+                audio_rms = float(np.sqrt(np.mean(audio_float * audio_float)))
 
-                    zero_seconds = now - zero_audio_since
+                if audio_rms <= DEAD_AUDIO_RMS_THRESHOLD:
+                    if dead_audio_since is None:
+                        dead_audio_since = now
 
-                    if zero_seconds >= ZERO_AUDIO_RECONNECT_SECONDS:
+                    dead_seconds = now - dead_audio_since
+
+                    if dead_seconds >= DEAD_AUDIO_RECONNECT_SECONDS:
                         print(
                             f"\n[AUDIO RECONNECT] "
-                            f"Received zero audio for "
-                            f"{zero_seconds:.0f} seconds. "
+                            f"Microphone signal remained effectively dead "
+                            f"for {dead_seconds:.0f} seconds "
+                            f"(RMS={audio_rms:.8f}). "
                             f"Reopening microphone.",
                             flush=True,
                         )
@@ -1219,7 +1232,7 @@ while not shutdown_requested:
                         reconnect_is_error = True
                         break
                 else:
-                    zero_audio_since = None
+                    dead_audio_since = None
 
                 scores = wake_model.predict(audio)
 
