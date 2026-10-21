@@ -4,3 +4,5 @@ onnxruntime==1.29.0
 openwakeword==0.6.0
 requests==2.34.2
 sounddevice==0.5.6
+fastapi==0.142.2
+uvicorn==0.54.0
