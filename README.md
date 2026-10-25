@@ -274,3 +274,68 @@ another Mac or under a different username.
 
 If the service is already loaded, use launchctl kickstart
 instead of bootstrap.
+
+
+<!-- JARVIS_PRODUCT_STATUS_2026 -->
+## Jarvis Home Hub: product overview and development status
+
+**Jarvis Home Hub is a locally hosted, voice-first smart-home prototype.** It combines Home Assistant device control, on-premises AI, spoken responses, and household-specific knowledge. The current system is a working demonstration, **not yet a turnkey, commercially supported appliance**.
+
+### Demonstrated capabilities — Phase 1 (working prototype)
+
+- **Wake word:** “Hey Jarvis” through a Google Pixel 6 Pro running Home Assistant Assist.
+- **Local AI:** Mac-hosted AnythingLLM with Ollama (`llama3.2:3b`), with speech recognition and intent routing integrated into the home hub.
+- **Home Assistant actions:** natural-language control of configured lights and other exposed devices; context-aware follow-up commands such as “turn it off.”
+- **Speaker routing:** voice selection of Pixel, Family Room, or upstairs audio targets; saved per-device preferences. The Family Room output uses a Home Assistant media player. Pixel text/audio and external speaker output have been demonstrated together.
+- **Knowledge retrieval:** question answering from AnythingLLM workspace documents, including house facts, kitchen-remodel information, and appliance model/serial identifiers.
+- **Kitchen presentation:** a spoken kitchen overview, including remodel details and major appliances.
+- **Local API:** FastAPI/Uvicorn `/ask` and `/health` endpoints, used by the Home Assistant conversation integration.
+- **Device learning and discovery:** existing training-mode and light-discovery workflows for configured devices; scope depends on local configuration.
+
+### Experimental capabilities — Phase 2 (partially implemented)
+
+| Capability | Current result | Remaining work |
+| --- | --- | --- |
+| Guided appliance operation | Monogram oven PDF and structured operating guide imported into AnythingLLM; basic follow-up conversation demonstrated | Verify every control step against manufacturer instructions; prevent invented buttons |
+| Cooking assistance | Frozen chicken pot pie demonstration with “next” follow-ups | Reliable temperature, preheat, cooking, and completion steps; food-safety validation |
+| Appliance terminology | Oven synonym normalization retrieves the Monogram electric-range record | Generalize aliases for all appliances without fragile hard-coded rules |
+| Multi-turn instructions | AnythingLLM retains conversational context in a thread | Explicit task/step state, confirmation, recovery, and timeout behavior |
+| Wake acknowledgment | Wake word activates listening | Reliable audible acknowledgment is not yet verified |
+| Audio and microphone follow-ups | Pixel Assist and configurable speaker responses are working | Improve continuous dialogue and speaker/microphone coordination |
+
+**Safety limitation:** The experimental appliance guide can generate incorrect touchscreen instructions. It must not be marketed as a validated operating procedure. Jarvis currently **guides users verbally**; it does not autonomously start heating an oven.
+
+### Productization roadmap — Phase 3 (planned)
+
+- Reproducible installation and onboarding for new households.
+- Configurable appliance inventory, document ingestion, and model-specific knowledge verification.
+- Automatic room/speaker identification and simplified multi-room audio configuration.
+- Reliable guided task engine with verified instructions and interruption handling.
+- Installer documentation, support/updates, privacy settings, diagnostics, and customer acceptance tests.
+
+### Architecture (demonstrated deployment)
+
+```text
+Google Pixel 6 Pro (Home Assistant Assist / “Hey Jarvis”)
+      → Home Assistant (Raspberry Pi 5)
+      → custom Jarvis conversation integration
+      → Jarvis FastAPI service (Mac mini)
+      ├── deterministic device/intent routing → Home Assistant
+      └── AnythingLLM workspace → local Ollama model + indexed documents
+      → Pixel response and/or selected Home Assistant speaker
+```
+
+### Example demonstration questions
+
+- “Hey Jarvis, turn on the Family Room light.”
+- “Turn it off.”
+- “Jarvis, change speaker to Family Room.”
+- “Present the kitchen.”
+- “What is the model and serial number of the kitchen oven?”
+- **Experimental only:** “Walk me through baking a chicken pot pie.”
+
+### Deployment and privacy notes
+
+- Local inference and document retrieval are central to this configuration; individual integrations may still require external network services.
+- Workspace documents, API keys, local addresses, customer data, and Home Assistant secrets must not be committed to public repositories.
+- Hardware and software versions above describe the demonstration setup, not a tested compatibility matrix.
