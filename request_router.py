@@ -26,6 +26,36 @@ def answer_question(message, current_request):
     Otherwise preserve Jarvis's previous routing behavior.
     """
 
+    # KITCHEN_PRESENTATION_V1
+    import re
+
+    command = re.sub(r"[^a-z0-9 ]", " ", message.lower())
+    command = " ".join(command.split())
+    command = re.sub(r"^(?:hey )?jarvis ", "", command)
+    command = re.sub(r"^please ", "", command)
+
+    if command in {
+        "present the kitchen",
+        "present the kitchen remodel",
+        "give me a kitchen presentation",
+        "give me a presentation of the kitchen",
+        "give me a presentation of the kitchen remodel",
+        "start the kitchen tour",
+    }:
+        return (
+            "Welcome to the kitchen. "
+            "This kitchen-only remodel cost 250 thousand dollars, "
+            "including work and appliances, and was completed March first, 2026. "
+            "It restored the original layout, moved cooking off the island, "
+            "and enlarged the island. "
+            "Custom Caliber cabinetry features soft-close doors and drawers. "
+            "Taj Mahal natural quartzite covers the countertops "
+            "and matching backsplash. "
+            "Appliances include a Sub-Zero refrigerator, "
+            "a Monogram range and microwave drawer, "
+            "and a Midea dishwasher."
+        )
+
     # Training Mode is deterministic and must never fall through to
     # device interpretation or AnythingLLM.
     answer = answer_training_mode_command(message)

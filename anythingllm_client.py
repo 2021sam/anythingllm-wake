@@ -165,6 +165,23 @@ Speech transcript:
 
 
 def ask_anythingllm(message: str) -> str:
+    # Match kitchen oven questions to the terminology in the
+    # kitchen appliance knowledge document.
+    import re
+
+    if re.search(r"\boven\b", message, re.IGNORECASE) and re.search(
+        r"\b(kitchen|model|serial|manufacturer|brand)\b",
+        message,
+        re.IGNORECASE,
+    ):
+        message = re.sub(
+            r"\boven\b",
+            "electric range with oven",
+            message,
+            count=1,
+            flags=re.IGNORECASE,
+        )
+
     api_key = API_KEY_FILE.read_text().strip()
 
     timing_http_start = time.monotonic()

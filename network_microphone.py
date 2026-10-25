@@ -249,6 +249,95 @@ class NetworkMicrophone:
             return output
 
 
+class NetworkInputStream:
+    """
+    sounddevice-like logical input stream backed by a persistent
+    NetworkMicrophone receiver.
+
+    Starting/stopping this stream does not close the network connection.
+    The NetworkMicrophone owns the TCP server and remains running.
+    """
+
+    def __init__(
+        self,
+        microphone,
+        samplerate=16000,
+        channels=1,
+        dtype="int16",
+        blocksize=1280,
+        device=None,
+        read_timeout=5.0,
+    ):
+        if samplerate != microphone.sample_rate:
+            raise ValueError(
+                f"Network microphone sample rate is "
+                f"{microphone.sample_rate}, requested {samplerate}"
+            )
+
+        if channels != 1:
+            raise ValueError(
+                "Network microphone currently supports mono audio only"
+            )
+
+        if dtype not in ("int16", np.int16):
+            raise ValueError(
+                "Network microphone currently supports int16 audio only"
+            )
+
+        self.microphone = microphone
+        self.samplerate = samplerate
+        self.channels = channels
+        self.dtype = dtype
+        self.blocksize = blocksize
+        self.device = device
+        self.read_timeout = read_timeout
+
+        self._active = False
+
+    @property
+    def active(self):
+        return self._active
+
+    @property
+    def stopped(self):
+        return not self._active
+
+    def start(self):
+        self._active = True
+        return self
+
+    def stop(self):
+        self._active = False
+        return self
+
+    def read(self, frame_count):
+        if not self._active:
+            raise RuntimeError(
+                "Cannot read from a stopped network input stream"
+            )
+
+        audio = self.microphone.read(
+            frame_count,
+            timeout=self.read_timeout,
+        )
+
+        # Match sounddevice.InputStream.read():
+        # shape=(frames, channels), plus overflow flag.
+        audio = audio.reshape(-1, 1)
+
+        overflowed = False
+
+        return audio, overflowed
+
+    def __enter__(self):
+        self.start()
+        return self
+
+    def __exit__(self, exc_type, exc_value, traceback):
+        self.stop()
+        return False
+
+
 if __name__ == "__main__":
     import time
 
